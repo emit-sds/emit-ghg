@@ -19,7 +19,7 @@ def main():
 
     #loclist = np.genfromtxt(args.input_file_list,dtype=str)
     #ch4list = sorted(glob.glob('methane_20220928/*_ch4_mf_scaled_ort.tif'))
-    ch4list = sorted(glob.glob('methane_20221001/*_ch4_mf_scaled_ort.tif'))
+    ch4list = sorted(glob.glob('methane_20221019/*_ch4_mf_scaled_ort.tif'))
     co2list = [x.replace('ch4','co2') for x in ch4list]
     #co2list = np.genfromtxt('co2_fids.txt',dtype=str).tolist()
 
@@ -49,7 +49,7 @@ def main():
         if cmd_str != '':
 
             cmd_str += f'&& echo {ch4list[_loc]} >> {run_file}'
-            cmd_str = f'sbatch -N 1 -c 40 --mem=180G -p standard,debug --wrap="{cmd_str}"'
+            cmd_str = f'sbatch -N 1 -c 40 --mem=180G -p standard --wrap="{cmd_str}"'
             subprocess.call(cmd_str,shell=True)
 
             #time.sleep(0.2)

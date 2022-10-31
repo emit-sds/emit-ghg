@@ -120,6 +120,10 @@ def main(input_args=None):
         #subprocess.call(f'rm {hr_temp}',shell=True)
 
  
+    rdn_kmz = args.radiance_file.replace('.img','.kmz')
+    dst_rdn_kmz = f'{args.output_base}_rdn_rgb.kmz'
+    if os.path.isfile(rdn_kmz) and os.path.isfile(dst_rdn_kmz) is False:
+        subprocess.call(f'cp {rdn_kmz} {dst_rdn_kmz}',shell=True)
 
 
 
