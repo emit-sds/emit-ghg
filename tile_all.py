@@ -1,12 +1,27 @@
-
+#! /usr/bin/env python
+#
+#  Copyright 2022 California Institute of Technology
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+#
+# ISOFIT: Imaging Spectrometer Optimal FITting
+# Authors: Philip G Brodrick, philip.brodrick@jpl.nasa.gov
 
 import os
 import subprocess
 import argparse
 import numpy as np
 import glob
-import time
-from emit_utils.file_checks import envi_header
 from spectral.io import envi
 
 
@@ -51,8 +66,6 @@ def main():
             cmd_str += f'&& echo {ch4list[_loc]} >> {run_file}'
             cmd_str = f'sbatch -N 1 -c 40 --mem=180G -p standard --wrap="{cmd_str}"'
             subprocess.call(cmd_str,shell=True)
-
-            #time.sleep(0.2)
 
         
 
