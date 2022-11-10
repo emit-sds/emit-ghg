@@ -2,7 +2,7 @@
 
 Welcome to the EMIT GHG codebase.  This is research code to support point-source mapping from EMIT, and stands slightly outside of the main SDS - if you're looking for info on the full SDS, please see [the repository guide](https://github.jpl.nasa.gov/emit-sds/emit-main/wiki/Repository-Guide).
 
-Please note that this is research code, made available as it is being developed and deployed in the interest of open science and open applications.  In particular, some poor coding practices like hardcoded paths are still in place, though should fade with time.  The main call for a particular scene is:
+Please note that this is research code, made available as it is being developed and deployed in the interest of open science and open applications.  In particular, some poor coding practices like hardcoded paths or pre-built dependencies are still in place, though should fade with time.  The main call for a particular scene is:
 
 ```
 python ghg_process.py 
