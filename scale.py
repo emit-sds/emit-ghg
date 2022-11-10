@@ -15,7 +15,7 @@
 #  limitations under the License.
 #
 # ISOFIT: Imaging Spectrometer Optimal FITting
-# Authors: Philip G Brodrick, philip.brodrick@jpl.nasa.gov
+# Authors: Philip G. Brodrick, philip.brodrick@jpl.nasa.gov
 
 import argparse
 from spectral.io import envi
