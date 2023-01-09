@@ -22,9 +22,9 @@ def main(input_args=None):
     args = parser.parse_args(input_args)
 
     if args.date == 'all':
-        rdn_files = glob(f'/beegfs/store/emit/ops/data/acquisitions/*/emit*/l1b/*_rdn_*.img')
+        rdn_files = glob(f'/beegfs/store/emit/ops/data/acquisitions/*/emit*/l1b/*_rdn_b0106_v01.img')
     else:
-        rdn_files = glob(f'/beegfs/store/emit/ops/data/acquisitions/{args.date}/emit*/l1b/*_rdn_*.img')
+        rdn_files = glob(f'/beegfs/store/emit/ops/data/acquisitions/{args.date}/emit*/l1b/*_rdn_b0106_v01.img')
     obs_files = [x.replace('rdn','obs') for x in rdn_files]
     loc_files = [x.replace('rdn','loc') for x in rdn_files]
     glt_files = [x.replace('rdn','glt') for x in rdn_files]
@@ -38,7 +38,7 @@ def main(input_args=None):
     for _r in range(len(rdn_files)):
     #for _r in range(2):
 
-      ch4_mf_kmz_file = f'{out_files[_r]}_ch4_mf_scaled_ort.kmz'
+      ch4_mf_kmz_file = f'{out_files[_r]}_ch4_mf_color.kmz'
 
       if os.path.isfile(ch4_mf_kmz_file) is False:
         #n+=1
@@ -48,8 +48,12 @@ def main(input_args=None):
         else:
             cmd_str += f'"'
 
-        subprocess.call(cmd_str,shell=True)
-        time.sleep(0.1)
+        #subprocess.call(cmd_str,shell=True)
+        #print(os.environ.copy())
+        env=os.environ.copy()
+        subprocess.call(cmd_str,shell=True,env=env)
+        #print(cmd_str)
+        #time.sleep(0.1)
 
 
 if __name__ == '__main__':

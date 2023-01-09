@@ -29,19 +29,14 @@ CO2_WL = [1922, 2337]
 
 def main(input_args=None):
     parser = argparse.ArgumentParser(description="Robust MF")
-    parser.add_argument('-k', '--kmodes', type=int, default=1, help='number of columnwise modes (k-means clusters)')
-    parser.add_argument('-r', '--reject', action='store_true', help='enable multimodal covariance outlier rejection')
-    parser.add_argument('-f', '--full', action='store_true', help='regularize multimodal estimates with the full column covariariance')    
-    parser.add_argument('--pcadim', default=6, type=int, help='number of PCA dimensions to use')
-    parser.add_argument('-m', '--metadata', action='store_true', help='save metadata image')    
-    parser.add_argument('-R', '--reflectance', action='store_true', help='reflectance signature')
+    parser.add_argument('-r', '--reject', action='store_true', help='enable multimodal covariance outlier rejection')   
     parser.add_argument('-M', '--model', type=str, default='looshrinkage', help='model name (looshrinkage (default)|empirical)')    
-    parser.add_argument('-n', '--num_cores', type=int, default=-1, help='number of cores (-1 (default))')    
+    parser.add_argument('-n', '--num_cores', type=int, default=-1, help='number of cores (-1 (default))')
+    parser.add_argument('--n_mc', type=int, default=10, help='number of monte carlo runs')
+    parser.add_argument('--mc_bag_fraction',type=float, default=0.7, help='fraction of data to use in each MC instance')
     parser.add_argument('--ray_temp_dir', type=str, default=None, help='ray temp directory (None (default))')    
     parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
-    parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')    
-    parser.add_argument('--threshold', type=float, default=None, help='Max-value threshold for connectivity and vis.')    
-    parser.add_argument('--connectivity', type=int, default=None, help='Number of connected components for plume detection.')    
+    parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')         
 
     parser.add_argument('radiance_file', type=str,  metavar='INPUT', help='path to input image')   
     parser.add_argument('library', type=str,  metavar='LIBRARY', help='path to target library file')
@@ -82,16 +77,21 @@ def main(input_args=None):
     else:
         logging.error('could not set active range - neither co2 nor ch4 found in library name')
         sys.exit(0)
-
-    img_mm = img.open_memmap(interleave='source',writeable=False)[:,active[0]-1:active[1],:]
+    active = np.where(np.logical_or(np.logical_and(wavelengths > 2137, wavelengths < 2493),
+                                    np.logical_and(wavelengths > 1610, wavelengths < 1840) ))[0]
+    active = np.where(np.logical_and(wavelengths > 2137, wavelengths < 2493))[0]
+    img_mm = img.open_memmap(interleave='source',writeable=False)[:,active,:]
+    #img_mm = img.open_memmap(interleave='source',writeable=False)[:,active[0]-1:active[1],:]
 
     # load the gas spectrum
     libdata = np.float64(np.loadtxt(args.library))
-    abscf=libdata[active[0]-1:active[1],2]
+    #abscf=libdata[active[0]-1:active[1],2]
+    abscf=libdata[active,2]
 
     # want bg modes to have at least as many samples as 120% x (# features)
-    bgminsamp = int((active[1]-active[0])*1.2)
-    bgmodel = 'unimodal' if args.kmodes==1 else 'multimodal'
+    #bgminsamp = int((active[1]-active[0])*1.2)
+    bgminsamp = len(active)*1.2
+    bgmodel = 'unimodal'
     
     # alphas for leave-one-out cross validation shrinkage
     if args.model == 'looshrinkage':
@@ -99,12 +99,16 @@ def main(input_args=None):
         alphas=(10.0 ** np.arange(aminexp,amaxexp+astep,astep))
         nll=np.zeros(len(alphas))
         
-
+    # a_noise = sqrt(mf.T @ S_e @ mf)
+    # a_total = sqrt(a_noise**2 + alpha_bootstrap_std**2)
+    
+    # compare w/ background std of mf results
+    
     # Get header info
     outmeta = img.metadata
     outmeta['lines'] = nrows
     outmeta['data type'] = np2envitype(np.float64)
-    outmeta['bands'] = 1
+    outmeta['bands'] = args.n_mc
     outmeta['description'] = 'matched filter results'
     outmeta['band names'] = 'mf'
     
@@ -117,15 +121,11 @@ def main(input_args=None):
         raise Exception('nodata value=%f > 0, values will not be masked'%nodata)
 
     modelparms  = 'modelname={args.model}, bgmodel={bgmodel}'
-    if args.kmodes > 1:
-        modelparms += ', bgmodes={args.kmodes}, pcadim={args.pcadim}, reject={args.reject}'
-        if args.model == 'looshrinkage':
-            modelparms += ', regfull={args.full}'
 
     if args.model == 'looshrinkage':
         modelparms += ', aminexp={aminexp}, amaxexp={amaxexp}, astep={astep}'
 
-    modelparms += ', reflectance={args.reflectance}, active_bands={active}'    
+    modelparms += ', active_bands={active}'    
 
     outdict = locals()
     outdict.update(globals())
@@ -138,23 +138,7 @@ def main(input_args=None):
     # Set values to nodata
     outimg_mm[...] = nodata
     
-    if args.metadata:
-        # output image of bgster membership labels per column
-        bgfile=baseoutfile+'_bg'
-        bgfilehdr=envi_header(bgfile)
-        bgmeta = outmeta
-        bgmeta['bands'] = 2
-        bgmeta['data type'] = np2envitype(np.uint16)
-        bgmeta['num alphas'] = len(alphas)
-        bgmeta['alphas'] = '{%s}'%(str(alphas)[1:-1])
-        bgmeta['band names'] = '{cluster_count, alpha_index}'
-        bgimg = envi.create_image(bgfilehdr,bgmeta,force=True,ext='')
-        bgimg_mm = bgimg.open_memmap(interleave='source',writable=True)
-
     outimg_shp = (outimg_mm.shape[0],1,outimg_mm.shape[2])
-    bgimg_shp = None
-    if args.metadata:
-        bgimg_shp = (bgimg_mm.shape[0],1,bgimg_mm.shape[2])
     del outimg_mm
 
 
@@ -169,15 +153,14 @@ def main(input_args=None):
     img_mm_id = ray.put(img_mm.copy())
     abscf_id = ray.put(abscf)
 
-    jobs = [mf_one_column.remote(col,img_mm_id, bgminsamp, outimg_shp, bgimg_shp, abscf_id, args) for col in np.arange(ncols)]
+    jobs = [mf_one_column.remote(col,img_mm_id, bgminsamp, outimg_shp, abscf_id, args) for col in np.arange(ncols)]
     
     rreturn = [ray.get(jid) for jid in jobs]
     outimg_mm = outimg.open_memmap(interleave='source',writable=True)
     for ret in rreturn:
         if ret[0] is not None:
-            outimg_mm[:, ret[2],-1] = np.squeeze(ret[0])
-            if args.metadata:
-                bgimg_mm[:, ret[2] ,-1] = np.squeeze(ret[1])
+            #outimg_mm[:, ret[1],-1] = np.squeeze(ret[0])
+            outimg_mm[:, ret[1],:] = ret[0][:,0,:]
 
     logging.info('Complete')
 
@@ -306,110 +289,51 @@ def looshrinkage(I_zm,alphas,nll,n,I_reg=[]):
 
 
 @ray.remote
-def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf, args):
+def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, abscf, args):
 
 
     logging.basicConfig(format='%(levelname)s:%(asctime)s ||| %(message)s', level=args.loglevel,
                         filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
 
     logging.debug(f'Col: {col}')
-    bgmodes = args.kmodes
     reject = args.reject
-    regfull = args.full
-    reflectance = args.reflectance
-    savebgmeta = args.metadata
     modelname = args.model
-    pcadim = args.pcadim
 
     # alphas for leave-one-out cross validation shrinkage
     if args.model == 'looshrinkage':
         astep,aminexp,amaxexp = 0.05,-10.0,0.0
         alphas=(10.0 ** np.arange(aminexp,amaxexp+astep,astep))
         nll=np.zeros(len(alphas))
-     
-
-    outimg_mm = np.zeros((outimg_mm_shape))
-    if savebgmeta:
-        bgimg_mm = np.zeros((outimg_mm_shape))
-    else:
-        bgimg_mm = None
-
-    # exclude nonfinite + negative spectra in covariance estimates
-    #useidx = lambda Icolz: np.where(((~(Icolz<0)) & np.isfinite(Icolz)).all(axis=1))[0]
-    # columnwise spectral averaging function
-    colavgfn = np.mean
-
-    Icol_full=img_mm[...,col]
-    use = np.where(np.all(np.logical_and(np.isfinite(Icol_full), Icol_full > -0.05), axis=1))[0]
-    Icol = np.float64(Icol_full[use,:].copy())
-    nuse = Icol.shape[0]
-
-    if nuse == 0:
-        return None, None, None
-    if len(use) == 1:
-        bglabels = np.ones(nuse)
-        bgulab = np.array([1])
-        return None, None, None
-    if bgmodes > 1:
-        # PCA projection down to a smaller number of dimensions 
-        # then apply K-means to separate spatially into clusters        
-        Icol_zm = Icol-colavgfn(Icol,axis=0)
-        evals,evecs = eig(cov(Icol_zm))
-        Icol_pca = Icol_zm.dot(evecs[:,:pcadim]) 
-        cmodel = MiniBatchKMeans(n_clusters=bgmodes)
-        if np.iscomplexobj(Icol_pca):
-            return None, None, None
-        bglabels = cmodel.fit(Icol_pca).labels_
-        bgulab = np.unique(bglabels)
-        bgcounts = []
-        bgulabn = np.zeros(len(bgulab))
-        for i,l in enumerate(bgulab):
-            lmask = bglabels==l
-            bgulabn[i] = lmask.sum()
-            if reject and bgulabn[i] < bgminsamp:
-                logging.debug('Flagged outlier cluster %d (%d samples)'%(l,bgulabn[i]))
-                bglabels[lmask] = -l
-                bgulab[i] = -l                                    
-            bgcounts.append("%d: %d"%(l,bgulabn[i]))
-
-            if savebgmeta:
-                bgimg_mm[use[lmask],0,0] = bgulabn[i]
-
-        logging.debug('bg cluster counts:',', '.join(bgcounts))
-        if (bgulab<0).all():
-            logging.warning('all clusters rejected, proceeding without rejection (beware!)')
-            bglabels,bgulab = abs(bglabels),abs(bgulab)
-            
-    else: # bgmodes==1
-        bglabels = np.ones(nuse)
-        bgulab = np.array([1])
-    # operate independently on each columnwise partition
-    for ki in bgulab:
-        # if bglabel<0 (=rejected), estimate using all (nonrejected) modes
-        kmask = bglabels==ki if ki >= 0 else bglabels>=0
-
-        # need to recompute mu and associated vars wrt this cluster
-        Icol_ki = (Icol if bgmodes == 1 else Icol[kmask,:]).copy()     
         
-        Icol_sub = Icol_ki.copy()
-        mu = colavgfn(Icol_sub,axis=0)
-        # reinit model/modelfit here for each column/cluster instance
+    rdn = np.float64(img_mm[...,col].copy())
+    use = np.where(np.all(np.logical_and(np.isfinite(rdn), rdn > -0.05), axis=1))[0]
+    nuse = len(use)
+    
+    outimg_mm = np.zeros((outimg_mm_shape))
+    mf_mc = np.zeros((rdn.shape[0],args.n_mc))
+
+    if nuse < 10:
+        return None, None
+    
+    np.random.seed(13)
+    for _mc in range(args.n_mc):
+        
+        perm = np.random.permutation(len(use))
+        subset_size = int(args.mc_bag_fraction*len(use))
+        cov_subset = use[perm[:subset_size]]
+        
+        
         if modelname == 'empirical':
             modelfit = lambda I_zm: cov(I_zm)
         elif modelname == 'looshrinkage':
             # optionally use the full zero mean column as a regularizer
-            Icol_reg = Icol-mu if (regfull and bgmodes>1) else []
-            modelfit = lambda I_zm: looshrinkage(I_zm,alphas,nll,
-                                                 nuse,I_reg=Icol_reg)
-            
+            modelfit = lambda I_zm: looshrinkage(I_zm,alphas,nll,subset_size,I_reg=[])
+                        
         try:                            
-            Icol_sub = Icol_sub-mu
-            Icol_model = modelfit(Icol_sub)
+            Icol_model = modelfit(rdn[cov_subset,:] - np.mean(rdn[cov_subset,:],axis=0))
             if modelname=='looshrinkage':
-                C,alphaidx = Icol_model
-                Cinv=inv(C)
-                if savebgmeta:
-                    bgimg_mm[use[kmask],0,1] = alphaidx
+                C, alphaidx = Icol_model
+                Cinv = inv(C)
             elif modelname=='empirical':
                 Cinv = inv(Icol_model)
             else:
@@ -417,24 +341,24 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf
                 
         except np.linalg.LinAlgError:
             logging.warn('singular matrix. skipping this column mode.')
-            outimg_mm[use[kmask],0,-1] = 0
-            return None, None, None
+            outimg_mm[subset,0,-1] = 0
+            return None, None
 
+        #logging.debug(f'{col}, {_mc}: {C[0,:5]}')
         # Classical matched filter
-        Icol_ki = Icol_ki-mu # = fully-sampled column mode
-        target = abscf.copy()
-        target = target-mu if reflectance else target*mu
+        target = abscf.copy() * np.mean(rdn[cov_subset,:],axis=0)
         normalizer = target.dot(Cinv).dot(target.T)
-        mf = (Icol_ki.dot(Cinv).dot(target.T)) / normalizer
+        mf = ((rdn[use,:] - np.mean(rdn[cov_subset,:], axis=0)).dot(Cinv).dot(target.T)) / normalizer
+        #logging.debug(f'{col}, {_mc}: {mf[:5]}')
+        
+        mf_mc[use,_mc] = mf * ppmscaling
+    
+    #outimg_mm[use,0,-1] = np.mean(mf_mc[use,:], axis=1)
+    outimg_mm[use,0,:] = mf_mc[use,:]                  
 
-        if reflectance:
-            outimg_mm[use[kmask],0,-1] = mf 
-        else:
-            outimg_mm[use[kmask],0,-1] = mf*ppmscaling
-
-    colmu = outimg_mm[use[bglabels>=0],0,-1].mean()
-    logging.debug('Column %i mean: %e'%(col,colmu))
-    return outimg_mm, bgimg_mm, col
+    colmu = np.mean(outimg_mm[use,0,:],axis=0)
+    logging.debug(f'Column {col} mean: {colmu}')
+    return outimg_mm, col
 
 
 

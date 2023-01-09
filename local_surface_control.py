@@ -240,11 +240,17 @@ def main(input_args=None):
                       help='path to irradiance file')
   parser.add_argument('output', type=str,  metavar='OUTPUT',
                       help='path for revised output image (mf ch4 ppm)')    
+  parser.add_argument('--n_cores', type=int,  default=-1, metavar='num_cores',
+                      help='number of cores to use')    
   parser.add_argument('--type', type=str,  default='ch4', choices=['ch4','co2'])
   args = parser.parse_args(input_args)
 
 
-  rayargs = {'ignore_reinit_error': True}
+  if args.n_cores == -1:
+    import multiprocessing
+    args.n_cores = multiprocessing.cpu_count() - 1 
+    
+  rayargs = {'ignore_reinit_error': True, 'num_cpus': args.n_cores, 'include_dashboard': False}
   ray.init(**rayargs)
 
   mask, rfl = get_mask(args.rdnfile, args.locfile, args.irrfile)
