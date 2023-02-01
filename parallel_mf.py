@@ -27,6 +27,7 @@ from os.path import join as pathjoin, exists as pathexists
 import scipy
 import numpy as np
 from utils import envi_header
+import pickle
 
 from sklearn.cluster import MiniBatchKMeans
 import ray
@@ -94,6 +95,7 @@ def main(input_args=None):
         sys.exit(0)
 
     img_mm = img.open_memmap(interleave='source',writeable=False)[:,active[0]-1:active[1],:]
+#    img_else_mm = img.open_memmap(interleave='source',writeable=False)[:,:active[0]-1,:]
 
     # load the gas spectrum
     libdata = np.float64(np.loadtxt(args.library))
@@ -177,8 +179,10 @@ def main(input_args=None):
         rayargs['num_cpus'] = multiprocessing.cpu_count() - 1
     ray.init(**rayargs)
     img_mm_id = ray.put(img_mm.copy())
+#    img_mm_else_id = ray.put(img_else_mm.copy())
     abscf_id = ray.put(abscf)
 
+    #jobs = [mf_one_column.remote(col,img_mm_id, img_mm_else_id, bgminsamp, outimg_shp, bgimg_shp, abscf_id, args) for col in np.arange(ncols)]
     jobs = [mf_one_column.remote(col,img_mm_id, bgminsamp, outimg_shp, bgimg_shp, abscf_id, args) for col in np.arange(ncols)]
     
     rreturn = [ray.get(jid) for jid in jobs]
@@ -316,6 +320,7 @@ def looshrinkage(I_zm,alphas,nll,n,I_reg=[]):
 
 
 @ray.remote
+#def mf_one_column(col, img_mm, img_else_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf, args):
 def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf, args):
 
 
@@ -349,9 +354,12 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf
     # columnwise spectral averaging function
     colavgfn = np.mean
 
+    logging.debug(f'Jay img_mm.shape = {img_mm.shape}')
     Icol_full=img_mm[...,col]
+    #Icol_else_full=img_else_mm[...,col]
     use = np.where(np.all(np.logical_and(np.isfinite(Icol_full), Icol_full > -0.05), axis=1))[0]
     Icol = np.float64(Icol_full[use,:].copy())
+#    Icol_else = np.float64(Icol_else_full[use,:].copy())
     nuse = Icol.shape[0]
 
     if nuse == 0:
@@ -394,34 +402,49 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf
         bglabels = np.ones(nuse)
         bgulab = np.array([1])
     # operate independently on each columnwise partition
+    
     for ki in bgulab:
         # if bglabel<0 (=rejected), estimate using all (nonrejected) modes
         kmask = bglabels==ki if ki >= 0 else bglabels>=0
 
         # need to recompute mu and associated vars wrt this cluster
         Icol_ki = (Icol if bgmodes == 1 else Icol[kmask,:]).copy()     
+        #Icol_else_ki = (Icol_else if bgmodes == 1 else Icol_else[kmask,:]).copy()     
         
+
+        logging.debug(f'Jay Icol_ki.shape = {Icol_ki.shape}')
         Icol_sub = Icol_ki.copy()
+        logging.debug(f'Jay Icol_sub.shape = {Icol_sub.shape}')
+        #Icol_else_sub = Icol_else_ki.copy()
         mu = colavgfn(Icol_sub,axis=0)
+        #mu_else = colavgfn(Icol_else_sub,axis=0)
         # reinit model/modelfit here for each column/cluster instance
         if modelname == 'empirical':
             modelfit = lambda I_zm: cov(I_zm)
         elif modelname == 'looshrinkage':
             # optionally use the full zero mean column as a regularizer
             Icol_reg = Icol-mu if (regfull and bgmodes>1) else []
+            #Icol_else_reg = Icol_else-mu_else if (regfull and bgmodes>1) else []
             modelfit = lambda I_zm: looshrinkage(I_zm,alphas,nll,
                                                  nuse,I_reg=Icol_reg)
+            #modelfit_else = lambda I_zm: looshrinkage(I_zm,alphas,nll,
+            #                                     nuse,I_reg=Icol_else_reg)
             
         try:                            
             Icol_sub = Icol_sub-mu
+            #Icol_else_sub = Icol_else_sub-mu_else
             Icol_model = modelfit(Icol_sub)
+            #Icol_else_model = modelfit_else(Icol_else_sub)
             if modelname=='looshrinkage':
                 C,alphaidx = Icol_model
+                #C_else,alphaidx_else = Icol_else_model
                 Cinv=inv(C)
+                #Cinv_else=inv(C_else)
                 if savebgmeta:
                     bgimg_mm[use[kmask],0,1] = alphaidx
             elif modelname=='empirical':
                 Cinv = inv(Icol_model)
+                #Cinv_else = inv(Icol_else_model)
             else:
                 Cinv = Icol_model
                 
@@ -432,10 +455,34 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf
 
         # Classical matched filter
         Icol_ki = Icol_ki-mu # = fully-sampled column mode
+        #Icol_else_ki = Icol_else_ki-mu_else # = fully-sampled column mode
         target = abscf.copy()
         target = target-mu if reflectance else target*mu
+        #target = target - mu
+        #if reflectance:
+        #    logging.debug('Jay in reflectance')
+        #    
+        #    target = target - mu
+        #else:
+        #    logging.debug('Jay in else of reflectance')
+        #    target = target * mu
         normalizer = target.dot(Cinv).dot(target.T)
         mf = (Icol_ki.dot(Cinv).dot(target.T)) / normalizer
+
+        #rx_else = np.add.reduce((Icol_else_ki @ Cinv_else * Icol_else_ki),1)
+
+        out = {\
+            'use': use,
+            'mu': mu,
+            'Icol_ki': Icol_ki,
+            'target': target,
+            'Cinv': Cinv,
+            'normalizer': normalizer,
+            'mf': mf}
+            #'rx_else': rx_else}
+
+        basename = f'/beegfs/scratch/jfahlen/ch4_outputs/tar_{col:04d}.pickle'
+        pickle.dump(out, open(basename, 'wb'))
 
         if reflectance:
             outimg_mm[use[kmask],0,-1] = mf 
