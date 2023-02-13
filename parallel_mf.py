@@ -52,6 +52,7 @@ def main(input_args=None):
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')    
     parser.add_argument('--threshold', type=float, default=None, help='Max-value threshold for connectivity and vis.')    
     parser.add_argument('--connectivity', type=int, default=None, help='Number of connected components for plume detection.')    
+    parser.add_argument('--use_ace_filter', action='store_true', help='Use the Adaptive Cosine Estimator (ACE) Filter')    
 
     parser.add_argument('radiance_file', type=str,  metavar='INPUT', help='path to input image')   
     parser.add_argument('library', type=str,  metavar='LIBRARY', help='path to target library file')
@@ -330,6 +331,7 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf
     savebgmeta = args.metadata
     modelname = args.model
     pcadim = args.pcadim
+    use_ace_filter = args.use_ace_filter
 
     # alphas for leave-one-out cross validation shrinkage
     if args.model == 'looshrinkage':
@@ -435,6 +437,13 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf
         target = abscf.copy()
         target = target-mu if reflectance else target*mu
         normalizer = target.dot(Cinv).dot(target.T)
+
+        if use_ace_filter:
+            # Self Mahalanobis distance
+            rx = np.sum(Icol_ki @ Cinv * Icol_ki, axis = 1)
+            # ACE filter normalization
+            normalizer = np.sqrt(normalizer * rx)
+
         mf = (Icol_ki.dot(Cinv).dot(target.T)) / normalizer
 
         if reflectance:
