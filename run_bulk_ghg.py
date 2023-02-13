@@ -55,6 +55,7 @@ def main(input_args=None):
       if os.path.isfile(ch4_mf_kmz_file) is False:
         #n+=1
         cmd_str=f'sbatch -N 1 -c 40 -p standard --mem=180G --wrap="python ghg_process.py {rdn_files[_r]} {obs_files[_r]} {loc_files[_r]} {glt_files[_r]} {out_files[_r]}'
+        print(cmd_str)
         if state_files[_r] is not None:
             cmd_str += f' --state_subs {state_files[_r]}"'
         else:

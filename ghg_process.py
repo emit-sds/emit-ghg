@@ -75,6 +75,7 @@ def main(input_args=None):
         mean_h2o = np.mean(h2o[h2o != -9999])
     else:
         # Just guess something...
+        exit()
         mean_h2o = 1.3
 
     # Target

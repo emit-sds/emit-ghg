@@ -12,6 +12,10 @@ from spectral.io import envi
 
 def main():
 
+    parser = argparse.ArgumentParser(description="Run visuals workflow")
+    parser.add_argument('dates', type=str, nargs='+')
+    args = parser.parse_args()
+
     path = os.environ['PATH']
     path = path.replace('\Library\\bin;',':')
     os.environ['PATH'] = path
@@ -19,8 +23,11 @@ def main():
     subprocess.call('mkdir temporal_tiled_visuals/ch4_mosaic_temporal_refined_dynamic', shell=True)
     subprocess.call('mkdir temporal_tiled_visuals/ch4_mosaic_temporal_static', shell=True)
 
-    dates = np.genfromtxt('days.txt',dtype=str)
-    dates = ['20230107', '20230108']
+    if args.dates[0] == 'all':
+        dates = [os.path.basename(x) for x in glob.glob('/beegfs/store/emit/ops/data/acquisitions/202*')]
+    else:
+        dates = args.dates
+
     for date in dates:
         
         dynamic_file_list =  f'temporal_line_lists/{date}_methane_refined_dynamic.txt'

@@ -32,15 +32,16 @@ def _write_bil_chunk(dat, outfile, line, shape, dtype = 'float32'):
 
 
 
-def single_image_ortho(img_dat, glt, glt_nodata_value=0):
+def single_image_ortho(img_dat, in_glt, glt_nodata_value=0):
     """Orthorectify a single image
     Args:
         img_dat (array like): raw input image
-        glt (array like): glt - 2 band 1-based indexing for output file(x, y)
+        in_glt (array like): glt - 2 band 1-based indexing for output file(x, y)
         glt_nodata_value (int, optional): Value from glt to ignore. Defaults to 0.
     Returns:
         array like: orthorectified version of img_dat
     """
+    glt = in_glt.copy()
     outdat = np.zeros((glt.shape[0], glt.shape[1], img_dat.shape[-1])) - 9999
     valid_glt = np.all(glt != glt_nodata_value, axis=-1)
     glt[valid_glt] -= 1 # account for 1-based indexing
