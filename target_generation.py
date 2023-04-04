@@ -24,7 +24,6 @@ import scipy.ndimage
 import argparse
 import spectral
 import h5py
-import pdb
 
 
 def check_param(value, min, max, name):
@@ -195,10 +194,6 @@ def generate_template_from_bands(centers, fwhm, params, dataset_loader, **kwargs
     :return template: the unit absorption spectum
     """
     # import scipy.stats
-
-    #params['water'] = 0.
-
-
     SCALING = 1e5
     centers = np.asarray(centers)
     fwhm = np.asarray(fwhm)
@@ -217,9 +212,6 @@ def generate_template_from_bands(centers, fwhm, params, dataset_loader, **kwargs
         kwargs.pop('concentrations')
     concentrations = np.asarray(kwargs.get(
         'concentrations', [0.0, 1000, 2000, 4000, 8000, 16000, 32000, 64000]))
-
-    #concentrations = [0., 100., 200., 400., 800., 1600., 3200., 6400.]
-
     rads, wave = generate_library(
         concentrations, dataset_fcn=dataset_loader, **params)
     # sigma = fwhm / ( 2 * sqrt( 2 * ln(2) ) )  ~=  fwhm / 2.355
@@ -240,10 +232,6 @@ def generate_template_from_bands(centers, fwhm, params, dataset_loader, **kwargs
     slope, _, _, _ = np.linalg.lstsq(
         np.stack((np.ones_like(concentrations), concentrations)).T, lograd, rcond=None)
     spectrum = slope[1, :] * SCALING
-
-    #st, en = 0,1
-    #spectrum = (rads[en,:] - rads[st,:]).dot(response) / (concentrations[en]-concentrations[st]) * SCALING
-
     target = np.stack((np.arange(1, spectrum.shape[0]+1), centers, spectrum)).T
     return target
 
