@@ -27,7 +27,6 @@ from os.path import join as pathjoin, exists as pathexists
 import scipy
 import numpy as np
 from utils import envi_header
-import pickle
 
 from sklearn.cluster import MiniBatchKMeans
 import ray
@@ -35,7 +34,6 @@ import logging
 
 ppmscaling = 100000.0
 CH4_WL = [2137, 2493]
-#CH4_WL = [1600, 2493]
 CO2_WL = [1922, 2337]
 
 
@@ -86,7 +84,8 @@ def main(input_args=None):
         sys.exit(0)
     wavelengths = np.array([float(x) for x in img.metadata['wavelength']])
     if 'ch4' in args.library:
-        active = [np.argmin(np.abs(wavelengths - x)) for x in CH4_WL]
+        # baseline_2nd_region_3ch'
+        active = [75, 85, 100, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283]
         logging.debug(f'CH4 active chanels: {active}')
     elif 'co2' in args.library:
         active = [np.argmin(np.abs(wavelengths - x)) for x in CO2_WL]
@@ -95,14 +94,14 @@ def main(input_args=None):
         logging.error('could not set active range - neither co2 nor ch4 found in library name')
         sys.exit(0)
 
-    img_mm = img.open_memmap(interleave='source',writeable=False)[:,active[0]-1:active[1],:]
+    img_mm = img.open_memmap(interleave='source',writeable=False)[:,active,:]
 
     # load the gas spectrum
     libdata = np.float64(np.loadtxt(args.library))
-    abscf=libdata[active[0]-1:active[1],2]
+    abscf=libdata[active,2]
 
     # want bg modes to have at least as many samples as 120% x (# features)
-    bgminsamp = int((active[1]-active[0])*1.2)
+    bgminsamp = int(len(active)*1.2)
     bgmodel = 'unimodal' if args.kmodes==1 else 'multimodal'
     
     # alphas for leave-one-out cross validation shrinkage
@@ -181,7 +180,7 @@ def main(input_args=None):
     img_mm_id = ray.put(img_mm.copy())
     abscf_id = ray.put(abscf)
 
-    jobs = [mf_one_column.remote(col,img_mm_id, bgminsamp, outimg_shp, bgimg_shp, abscf_id, args, baseoutfile) for col in np.arange(ncols)]
+    jobs = [mf_one_column.remote(col,img_mm_id, bgminsamp, outimg_shp, bgimg_shp, abscf_id, args) for col in np.arange(ncols)]
     
     rreturn = [ray.get(jid) for jid in jobs]
     outimg_mm = outimg.open_memmap(interleave='source',writable=True)
@@ -192,6 +191,18 @@ def main(input_args=None):
                 bgimg_mm[:, ret[2] ,-1] = np.squeeze(ret[1])
 
     logging.info('Complete')
+
+def gaussian_window(C, width):
+    nx, ny = C.shape
+    if width <= 0:
+        raise ValueError(f'Width must be > 0!')
+
+    window = []
+    x = np.arange(nx)
+    for i in range(nx):
+        w = np.exp(-1*(x-i)**2/2/width**2)
+        window.append(w)
+    return np.array(window)
 
 def randperm(*args):
     n = args[0]
@@ -318,8 +329,7 @@ def looshrinkage(I_zm,alphas,nll,n,I_reg=[]):
 
 
 @ray.remote
-#def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf, args):
-def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf, args, baseoutfile):
+def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf, args):
 
 
     logging.basicConfig(format='%(levelname)s:%(asctime)s ||| %(message)s', level=args.loglevel,
@@ -352,7 +362,6 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf
     # columnwise spectral averaging function
     colavgfn = np.mean
 
-    logging.debug(f'Jay img_mm.shape = {img_mm.shape}')
     Icol_full=img_mm[...,col]
     use = np.where(np.all(np.logical_and(np.isfinite(Icol_full), Icol_full > -0.05), axis=1))[0]
     Icol = np.float64(Icol_full[use,:].copy())
@@ -398,17 +407,14 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf
         bglabels = np.ones(nuse)
         bgulab = np.array([1])
     # operate independently on each columnwise partition
-    
     for ki in bgulab:
         # if bglabel<0 (=rejected), estimate using all (nonrejected) modes
         kmask = bglabels==ki if ki >= 0 else bglabels>=0
 
         # need to recompute mu and associated vars wrt this cluster
         Icol_ki = (Icol if bgmodes == 1 else Icol[kmask,:]).copy()     
-
-        logging.debug(f'Jay Icol_ki.shape = {Icol_ki.shape}')
+        
         Icol_sub = Icol_ki.copy()
-        logging.debug(f'Jay Icol_sub.shape = {Icol_sub.shape}')
         mu = colavgfn(Icol_sub,axis=0)
         # reinit model/modelfit here for each column/cluster instance
         if modelname == 'empirical':
@@ -424,11 +430,13 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf
             Icol_model = modelfit(Icol_sub)
             if modelname=='looshrinkage':
                 C,alphaidx = Icol_model
-                Cinv=inv(C)
+                w = gaussian_window(C, 20)
+                Cinv=inv(C*w)
                 if savebgmeta:
                     bgimg_mm[use[kmask],0,1] = alphaidx
             elif modelname=='empirical':
-                Cinv = inv(Icol_model)
+                w = gaussian_window(Icol_model, 20)
+                Cinv = inv(Icol_model*w)
             else:
                 Cinv = Icol_model
                 
@@ -441,34 +449,8 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf
         Icol_ki = Icol_ki-mu # = fully-sampled column mode
         target = abscf.copy()
         target = target-mu if reflectance else target*mu
-        #target = target - mu
-        #if reflectance:
-        #    logging.debug('Jay in reflectance')
-        #    
-        #    target = target - mu
-        #else:
-        #    logging.debug('Jay in else of reflectance')
-        #    target = target * mu
-        normalizer = target.dot(Cinv).dot(target.T) 
-
-        #rx = np.sum(Icol_ki @ Cinv * Icol_ki, axis = 1)
-        #normalizer = np.sqrt(normalizer * rx)
-        
-
+        normalizer = target.dot(Cinv).dot(target.T)
         mf = (Icol_ki.dot(Cinv).dot(target.T)) / normalizer
-
-        out = {\
-            'use': use,
-            'mu': mu,
-            'Icol_ki': Icol_ki,
-            'target': target,
-            'Cinv': Cinv,
-            'normalizer': normalizer,
-            'mf': mf}
-
-        #basename = f'/beegfs/scratch/jfahlen/ch4_outputs/tar_{col:04d}.pickle'
-        basename = f'{baseoutfile}_tar_{col:04d}.pickle'
-        pickle.dump(out, open(basename, 'wb'))
 
         if reflectance:
             outimg_mm[use[kmask],0,-1] = mf 
