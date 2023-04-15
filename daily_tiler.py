@@ -31,7 +31,7 @@ def main(rawargs=None):
         if args.dynamic:
             subprocess.call(f'python /beegfs/scratch/brodrick/emit/MMGIS/auxiliary/gdal2customtiles/gdal2tiles_3.5.2.py --dem {fi} {args.output_dest} -r near-composite -z 5-11 --srcnodata=-9999 --processes=40 && echo {fi} >> {os.path.splitext(args.file_list)[0] + "_completed.txt"}',shell=True)
         else:
-            subprocess.call(f'gdal2tiles.py {fi} {args.output_dest} -z 4-12 --srcnodata 0 --processes=40 -r antialias && echo {fi} >> {os.path.splitext(args.file_list)[0] + "_completed.txt"}',shell=True)
+            subprocess.call(f'gdal2tiles.py {fi} {args.output_dest} -z 4-12 --srcnodata 0 --processes=40 -r antialias -x && echo {fi} >> {os.path.splitext(args.file_list)[0] + "_completed.txt"}',shell=True)
         #subprocess.call(f'python /beegfs/scratch/brodrick/emit/MMGIS/auxiliary/gdal2customtiles/gdal2tiles_3.5.2.py --dem {fi} {args.output_dest} -r near-composite -z 2-16 --srcnodata=-9999 --processes=40 && echo {fi} > {os.path.splitext(args.file_list)[0] + "_completed.txt"}',shell=True)
         #while success is False and count < 3:
         #    try:

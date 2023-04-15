@@ -442,7 +442,8 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf
             # Self Mahalanobis distance
             rx = np.sum(Icol_ki @ Cinv * Icol_ki, axis = 1)
             # ACE filter normalization
-            normalizer = np.sqrt(normalizer * rx)
+            #normalizer = np.sqrt(normalizer * rx)
+            normalizer = normalizer * rx
 
         mf = (Icol_ki.dot(Cinv).dot(target.T)) / normalizer
 

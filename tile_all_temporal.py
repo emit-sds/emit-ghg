@@ -44,7 +44,8 @@ def main():
         out_fold_static = f'temporal_tiled_visuals/ch4_mosaic_temporal_static/{od_date}'
 
         
-        subprocess.call(f'sbatch -N 1 -c 40 -p standard --mem=180G --wrap="python daily_tiler.py {static_refined_file_list} {out_fold_refined_static}"',shell=True)
+        #print(f'sbatch -N 1 -c 40 -p debug --mem=180G --wrap="python daily_tiler.py {static_refined_file_list} {out_fold_refined_static}"')
+        subprocess.call(f'sbatch -N 1 -c 40 --mem=180G --job-name ch4_tile_{date} --wrap="python daily_tiler.py {static_refined_file_list} {out_fold_refined_static}"',shell=True)
         #subprocess.call(f'sbatch -N 1 -c 40 -p standard --mem=180G --wrap="python daily_tiler.py {static_file_list} {out_fold_static}"',shell=True)
 
     #parser = argparse.ArgumentParser(description="Run visuals workflow")
