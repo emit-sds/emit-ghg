@@ -35,7 +35,7 @@ def main(input_args=None):
 
 
     files = np.genfromtxt(args.filelist, dtype=str)
-    rdn_files = [sorted(glob(f'/beegfs/store/emit/ops/data/acquisitions/{x[4:12]}/{x.split("_")[0]}/l1b/*_l1b_rdn_*.img'))[-1] for x in files]
+    rdn_files = [sorted(glob(f'/beegfs/store/emit/ops/data/acquisitions/{x[4:12]}/{x.split("_")[0]}/l1b/*_rdn_b0106_v01.img'))[-1] for x in files]
     obs_files = [x.replace('rdn','obs') for x in rdn_files]
     loc_files = [x.replace('rdn','loc') for x in rdn_files]
     glt_files = [x.replace('rdn','glt') for x in rdn_files]
@@ -48,7 +48,7 @@ def main(input_args=None):
     for _r in range(len(rdn_files)):
     #for _r in range(10):
 
-        cmd_str=f'sbatch -N 1 -c 40 --mem=180G --wrap="python ghg_process.py {rdn_files[_r]} {obs_files[_r]} {loc_files[_r]} {glt_files[_r]} {out_files[_r]}'
+        cmd_str=f'sbatch -N 1 -c 40 --mem=180G --wrap="python ghg_process.py {rdn_files[_r]} {obs_files[_r]} {loc_files[_r]} {glt_files[_r]} {out_files[_r]} --co2'
         if state_files[_r] is not None:
             cmd_str += f' --state_subs {state_files[_r]}"'
         else:

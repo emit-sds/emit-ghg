@@ -219,7 +219,8 @@ def local_model(x_full, y_full, good_full, start_l, end_l, start_c, end_c):
         good = good.reshape((end_l-start_l,end_c-start_c))
         print(np.mean(pred))
 
-        ret_y[good] -= pred[good]
+        #ret_y[good] -= pred[good]
+        ret_y[good] -= np.maximum(pred[good],0)
     else:
         print(f'no good found: {np.sum(good)}')
 
