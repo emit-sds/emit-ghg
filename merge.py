@@ -34,8 +34,11 @@ def main(input_args=None):
     for sf in source_files:
         loc = json.load(open(sf,'r'))
         for lf in loc['features']:
-            lf['properties']['plume_complex_count'] = plume_count + 1
-            plume_count +=1
+            if lf['geometry']['type'] == 'Polygon':
+                lf['properties']['plume_complex_count'] = plume_count + 1
+                plume_count +=1
+            else:
+                lf['properties']['plume_complex_count'] = plume_count
         #for _feat, feat in enumerate(loc['features']):
         #    feat['properties']['style'] = {'color': 'green', 'opacity': 1, 'weight': 2, 'fillOpacity': 0, 'maxZoom': 10, 'minZoom': 0}
         #    #del feat['vis_style']
