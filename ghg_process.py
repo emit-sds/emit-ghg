@@ -41,6 +41,7 @@ def main(input_args=None):
     parser.add_argument('loc_file', type=str,  help='path to location image')   
     parser.add_argument('glt_file', type=str,  help='path to glt image')   
     parser.add_argument('mask_file', type=str,  help='path to mask image')   
+    parser.add_argument('l2a_mask_file', type=str,  help='path to l2a mask image')   
     parser.add_argument('output_base', type=str,  help='output basepath for output image')    
     parser.add_argument('--state_subs', type=str, default=None,  help='state file from OE retrieval')    
     parser.add_argument('--overwrite', action='store_true',  help='state file from OE retrieval')    
@@ -152,7 +153,7 @@ def main(input_args=None):
     print(ch4_mf_file)
     if os.path.isfile(ch4_mf_file) is False or args.overwrite:
         print('starting parallel mf')
-        subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, args.mask_file]
+        subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, args.mask_file, args.l2a_mask_file]
         if args.ace_filter:
             subargs.append('--use_ace_filter')
         parallel_mf.main(subargs)
