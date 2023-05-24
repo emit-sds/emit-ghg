@@ -98,8 +98,7 @@ def main(input_args=None):
         sys.exit(0)
     wavelengths = np.array([float(x) for x in img.metadata['wavelength']])
     if 'ch4' in args.library:
-        # baseline_2nd_region_3ch'
-        active = [75, 85, 100, 164, 165, 166, 167, 168, 169, 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184, 185, 186, 187, 188, 189, 190, 235, 236, 237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283]
+        active = [np.argmin(np.abs(wavelengths - x)) for x in CH4_WL]
         logging.debug(f'CH4 active chanels: {active}')
     elif 'co2' in args.library:
         active = [np.argmin(np.abs(wavelengths - x)) for x in CO2_WL]
@@ -108,10 +107,12 @@ def main(input_args=None):
         logging.error('could not set active range - neither co2 nor ch4 found in library name')
         sys.exit(0)
 
-    img_mm = img.open_memmap(interleave='source',writeable=False)[:,active,:]
+    img_mm = img.open_memmap(interleave='source',writeable=False)[:,active[0]-1:active[1],:]
 
     # Make flare mask
-    b270_idx = np.argwhere(np.array(active) == 270)[0][0]
+    wavelenths_active = wavelengths[active[0]-1:active[1]]
+    # Flare masking is done on native channel 270, or 2389.486 nm
+    b270_idx = np.argmin(np.abs(wavelenths_active - 2389.486)) 
     hot = np.where(np.logical_and(img_mm[:,b270_idx,:] > 1.5, umask_dilated == True), 1., 0.)
     hot_dilated = scipy.ndimage.uniform_filter(hot, [5,5]) > 0.01
     umask_dilated = np.where(hot_dilated, False, umask_dilated)
@@ -119,12 +120,15 @@ def main(input_args=None):
     # Clouds and water
     umask_dilated = np.where(l2a_mask, False, umask_dilated)
 
+    # Fraction of lines in each cross track column that are used in the MF cov and mu estimation
+    umask_column_fraction = np.sum(umask_dilated, axis = 0) / umask_dilated.shape[0]
+
     # load the gas spectrum
     libdata = np.float64(np.loadtxt(args.library))
-    abscf=libdata[active,2]
+    abscf=libdata[active[0]-1:active[1],2]
 
     # want bg modes to have at least as many samples as 120% x (# features)
-    bgminsamp = int(len(active)*1.2)
+    bgminsamp = int((active[1]-active[0])*1.2)
     bgmodel = 'unimodal' if args.kmodes==1 else 'multimodal'
     
     # alphas for leave-one-out cross validation shrinkage
@@ -141,6 +145,7 @@ def main(input_args=None):
     outmeta['bands'] = 1
     outmeta['description'] = 'matched filter results'
     outmeta['band names'] = 'mf'
+    outmeta['fraction_of_lines_per_column_used_in_mf_mu_cov_estimation'] = ','.join([f'{x:0.3g}' for x in umask_column_fraction])
     
     outmeta['interleave'] = 'bip'    
     for kwarg in ['smoothing factors','wavelength','wavelength units','fwhm']:
@@ -214,18 +219,6 @@ def main(input_args=None):
                 bgimg_mm[:, ret[2] ,-1] = np.squeeze(ret[1])
 
     logging.info('Complete')
-
-def gaussian_window(C, width):
-    nx, ny = C.shape
-    if width <= 0:
-        raise ValueError(f'Width must be > 0!')
-
-    window = []
-    x = np.arange(nx)
-    for i in range(nx):
-        w = np.exp(-1*(x-i)**2/2/width**2)
-        window.append(w)
-    return np.array(window)
 
 def randperm(*args):
     n = args[0]
@@ -443,6 +436,11 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf
         if bgmodes != 1:
             kmask_mask = kmask[umask_dilated[use,col]]
             Icol_ki_for_mu_C = Icol_ki_for_mu_C[kmask_mask,:].copy()
+
+        if Icol_ki_for_mu_C.shape[0] <= Icol_ki_for_mu_C.shape[1]:
+            logging.warn('All elements masked out. Skipping this column.')
+            outimg_mm[use[kmask],0,-1] = 0
+            return None, None, None
         
         Icol_sub = Icol_ki.copy()
         mu = colavgfn(Icol_ki_for_mu_C,axis=0)
@@ -461,13 +459,11 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf
             Icol_model = modelfit(Icol_sub_for_mu_C)
             if modelname=='looshrinkage':
                 C,alphaidx = Icol_model
-                w = gaussian_window(C, 20)
-                Cinv=inv(C*w)
+                Cinv=inv(C)
                 if savebgmeta:
                     bgimg_mm[use[kmask],0,1] = alphaidx
             elif modelname=='empirical':
-                w = gaussian_window(Icol_model, 20)
-                Cinv = inv(Icol_model*w)
+                Cinv = inv(Icol_model)
             else:
                 Cinv = Icol_model
                 

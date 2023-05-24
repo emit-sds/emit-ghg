@@ -22,8 +22,7 @@ import subprocess
 
 import target_generation
 import parallel_mf
-#import local_surface_control_simple
-import local_surface_control
+import local_surface_control_simple
 import scale
 import logging
 from spectral.io import envi
@@ -159,11 +158,11 @@ def main(input_args=None):
         parallel_mf.main(subargs)
 
     if (os.path.isfile(co2_mf_refined_file) is False or args.overwrite) and args.co2:
-        local_surface_control.main([co2_mf_file, args.radiance_file, args.loc_file, irr_file, co2_mf_refined_file, '--type', 'co2'])
-        #local_surface_control_simple.main([co2_mf_file, args.radiance_file, args.mask_file, co2_mf_refined_file, '--type', 'co2'])
+        #local_surface_control.main([co2_mf_file, args.radiance_file, args.loc_file, irr_file, co2_mf_refined_file, '--type', 'co2'])
+        local_surface_control_simple.main([co2_mf_file, args.radiance_file, args.mask_file, co2_mf_refined_file, '--type', 'co2'])
     if os.path.isfile(ch4_mf_refined_file) is False or args.overwrite:
-        local_surface_control.main([ch4_mf_file, args.radiance_file, args.loc_file, irr_file, ch4_mf_refined_file, '--type', 'ch4'])
-        #local_surface_control_simple.main([ch4_mf_file, args.radiance_file, args.mask_file, ch4_mf_refined_file, '--type', 'ch4'])
+        #local_surface_control.main([ch4_mf_file, args.radiance_file, args.loc_file, irr_file, ch4_mf_refined_file, '--type', 'ch4'])
+        local_surface_control_simple.main([ch4_mf_file, args.radiance_file, args.mask_file, ch4_mf_refined_file, '--type', 'ch4'])
 
     if (os.path.isfile(co2_mf_refined_ort_file) is False or args.overwrite) and args.co2:
         subprocess.call(f'python apply_glt.py {args.glt_file} {co2_mf_refined_file} {co2_mf_refined_ort_file}',shell=True)
