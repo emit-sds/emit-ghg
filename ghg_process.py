@@ -51,9 +51,6 @@ def main(input_args=None):
 
     irr_file = '/beegfs/scratch/brodrick/src/isofit/data/kurudz_0.1nm.dat'
 
-    logging.basicConfig(format='%(levelname)s:%(asctime)s ||| %(message)s', level=args.loglevel,
-                        filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
-
     radiance_file = args.radiance_file
     radiance_file_hdr = envi_header(radiance_file)
  
@@ -63,22 +60,8 @@ def main(input_args=None):
     loc_file = args.loc_file
     loc_file_hdr = envi_header(loc_file)
 
-    sza = envi.open(obs_file_hdr).open_memmap(interleave='bip')[...,4]
-    mean_sza = np.mean(sza[sza != -9999])
-
-    elevation = envi.open(loc_file_hdr).open_memmap(interleave='bip')[...,2]
-    mean_elevation = np.mean(elevation[elevation != -9999]) / 1000.
-    mean_elevation = min(max(0, mean_elevation),3)
-
-    if args.state_subs is not None:
-        state_ds = envi.open(envi_header(args.state_subs))
-        band_names = state_ds.metadata['band names']
-        h2o = state_ds.open_memmap(interleave='bip')[...,band_names.index('H2OSTR')]
-        mean_h2o = np.mean(h2o[h2o != -9999])
-    else:
-        # Just guess something...
-        exit()
-        mean_h2o = 1.3
+    logging.basicConfig(format='%(levelname)s:%(asctime)s ||| %(message)s', level=args.loglevel,
+                        filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
 
     # Target
     co2_target_file = f'{args.output_base}_co2_target'
@@ -134,6 +117,25 @@ def main(input_args=None):
         if np.all(dat == -9999):
             subprocess.call(f'rm {args.output_base}_ch4*',shell=True)
 
+    if (os.path.isfile(co2_target_file) is False and args.co2) or args.overwrite or os.path.isfile(ch4_target_file) is False:
+        sza = envi.open(obs_file_hdr).open_memmap(interleave='bip')[...,4]
+        mean_sza = np.mean(sza[sza != -9999])
+
+        elevation = envi.open(loc_file_hdr).open_memmap(interleave='bip')[...,2]
+        mean_elevation = np.mean(elevation[elevation != -9999]) / 1000.
+        mean_elevation = min(max(0, mean_elevation),3)
+
+        if args.state_subs is not None:
+            state_ds = envi.open(envi_header(args.state_subs))
+            band_names = state_ds.metadata['band names']
+            h2o = state_ds.open_memmap(interleave='bip')[...,band_names.index('H2OSTR')]
+            mean_h2o = np.mean(h2o[h2o != -9999])
+        else:
+            # Just guess something...
+            exit()
+            mean_h2o = 1.3
+
+
 
     if (os.path.isfile(co2_target_file) is False or args.overwrite) and args.co2:
         target_generation.main(['--co2', '-z', str(mean_sza), '-s', '100', '-g', str(mean_elevation), '-w', str(mean_h2o), '--output', co2_target_file, '--hdr', radiance_file_hdr])
@@ -181,9 +183,13 @@ def main(input_args=None):
 
     if os.path.isfile(ch4_mf_refined_scaled_color_ort_file) is False or args.overwrite:
         scale.main([ch4_mf_refined_ort_file, ch4_mf_refined_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
+    if os.path.isfile(co2_mf_refined_scaled_color_ort_file) is False or args.overwrite:
+        scale.main([co2_mf_refined_ort_file, co2_mf_refined_scaled_color_ort_file, '1', '100000', '--cmap', 'YlOrRd'])
 
     if os.path.isfile(ch4_mf_scaled_color_ort_file) is False or args.overwrite:
         scale.main([ch4_mf_ort_file, ch4_mf_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
+    if os.path.isfile(co2_mf_scaled_color_ort_file) is False or args.overwrite:
+        scale.main([co2_mf_ort_file, co2_mf_scaled_color_ort_file, '1', '100000', '--cmap', 'YlOrRd'])
 
 
     if os.path.isfile(ch4_mf_refined_kmz_file) is False or args.overwrite:
@@ -206,11 +212,26 @@ def main(input_args=None):
         subprocess.call(f'rm {hr_temp}',shell=True)
 
 
+    if os.path.isfile(co2_mf_refined_color_kmz_file) is False or args.overwrite:
+        hr_temp = f'{co2_mf_refined_ort_file}_hrtemp'
+        subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {co2_mf_refined_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
+        subprocess.call(f'gdal_translate {hr_temp} {co2_mf_refined_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
+        subprocess.call(f'rm {hr_temp}',shell=True)
+
+
     if os.path.isfile(ch4_mf_color_kmz_file) is False or args.overwrite:
         hr_temp = f'{ch4_mf_refined_ort_file}_hrtemp'
         subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {ch4_mf_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
         subprocess.call(f'gdal_translate {hr_temp} {ch4_mf_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
         subprocess.call(f'rm {hr_temp}',shell=True)
+
+    if os.path.isfile(co2_mf_color_kmz_file) is False or args.overwrite:
+        hr_temp = f'{co2_mf_refined_ort_file}_hrtemp'
+        subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {co2_mf_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
+        subprocess.call(f'gdal_translate {hr_temp} {co2_mf_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
+        subprocess.call(f'rm {hr_temp}',shell=True)
+
+
  
     rdn_kmz = args.radiance_file.replace('.img','.kmz')
     dst_rdn_kmz = f'{args.output_base}_rdn_rgb.kmz'

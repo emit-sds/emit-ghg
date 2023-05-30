@@ -29,8 +29,9 @@ import time
 
 def main(input_args=None):
     parser = argparse.ArgumentParser(description="Robust MF")
-    parser.add_argument('date', type=str,  metavar='INPUT', help='path to input image')   
+    parser.add_argument('date', type=str,  metavar='DATE', help='path to input image')   
     parser.add_argument('output_dir', type=str,  metavar='OUTPUT', help='path to input image')   
+    parser.add_argument('--co2', action='store_true', help='flag to indicate whether to run co2')    
     args = parser.parse_args(input_args)
 
     if args.date == 'all':
@@ -49,19 +50,23 @@ def main(input_args=None):
 
     n=0
     for _r in range(len(rdn_files)):
-    #for _r in range(2):
 
       ch4_mf_kmz_file = f'{out_files[_r]}_ch4_mf_color.kmz'
+      co2_mf_kmz_file = f'{out_files[_r]}_co2_mf_color.kmz'
 
-      if os.path.isfile(ch4_mf_kmz_file) is False:
-      #if True:
-        #n+=1
+      launch = os.path.isfile(ch4_mf_kmz_file) is False
+      if os.path.isfile(ch4_mf_kmz_file) is False or (args.co2 and os.path.isfile(co2_mf_kmz_file) is False):
         cmd_str=f'sbatch -N 1 -c 40 -p standard --mem=180G --wrap="python ghg_process.py {rdn_files[_r]} {obs_files[_r]} {loc_files[_r]} {glt_files[_r]} {mask_files[_r]} {out_files[_r]}'
-        print(cmd_str)
+
+        if args.co2:
+            cmd_str += ' --co2'
+
         if state_files[_r] is not None:
             cmd_str += f' --state_subs {state_files[_r]}"'
         else:
             cmd_str += f'"'
+
+        print(cmd_str)
 
         #subprocess.call(cmd_str,shell=True)
         #print(os.environ.copy())

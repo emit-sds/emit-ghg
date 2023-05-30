@@ -55,7 +55,7 @@ def write_output_file(source_ds, output_img, output_file):
 
 
 
-def plume_mask(input: np.array, pm):
+def plume_mask(input: np.array, pm, style='ch4'):
 
     y_locs = np.where(np.sum(pm > 0, axis=1))[0]
     x_locs = np.where(np.sum(pm > 0, axis=0))[0]
@@ -63,8 +63,12 @@ def plume_mask(input: np.array, pm):
     plume_dat = input[y_locs[0]:y_locs[-1],x_locs[0]:x_locs[-1]]
     plume_dat[pm[y_locs[0]:y_locs[-1],x_locs[0]:x_locs[-1]] == 0] = 0
     
-    plume_dat = gauss_blur(plume_dat, 3, preserve_nans=False)
-    local_output_mask = plume_dat > 50
+    if style == 'ch4':
+        plume_dat = gauss_blur(plume_dat, 3, preserve_nans=False)
+        local_output_mask = plume_dat > 50
+    else:
+        plume_dat = gauss_blur(plume_dat, 5, preserve_nans=False)
+        local_output_mask = plume_dat > 10000
     
     output_plume_mask = np.zeros(pm.shape,dtype=bool)
     output_plume_mask[y_locs[0]:y_locs[-1],x_locs[0]:x_locs[-1]] = local_output_mask
@@ -215,7 +219,7 @@ def main(input_args=None):
     for lab in un_labels:
         
         maxval = np.nanmax(rawdat[plume_labels == lab])
-        if np.sum(plume_labels == lab) < 5 or maxval < 200:
+        if np.sum(plume_labels == lab) < 15 or maxval < 200:
             continue
 
         rawloc = np.where(np.logical_and(rawdat == maxval, plume_labels == lab))
