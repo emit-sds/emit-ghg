@@ -14,7 +14,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Run visuals workflow")
     parser.add_argument('dates', type=str, nargs='+')
-    parser.add_argument('--type', type=str, default='co2', choices=['co2','ch4'])
+    parser.add_argument('--type', type=str, default='ch4', choices=['co2','ch4'])
     args = parser.parse_args()
 
     path = os.environ['PATH']
