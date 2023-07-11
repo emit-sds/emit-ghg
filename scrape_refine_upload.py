@@ -1,7 +1,6 @@
 import argparse
 
 import os
-import scipy
 import numpy as np
 import json
 import glob
@@ -123,7 +122,7 @@ def prep_predictor_image(predictor, data, ptype):
 
     predictor.set_image(oi)
 
-def rawspace_coordinate_coversion(glt, coordinates):
+def rawspace_coordinate_conversion(glt, coordinates, trans):
     rawspace_coords = []
     for ind in coordinates:
         glt_ypx = int(round((ind[1] - trans[3])/ trans[5]))
@@ -132,7 +131,7 @@ def rawspace_coordinate_coversion(glt, coordinates):
         rawspace_coords.append(lglt.tolist())
     return rawspace_coords
 
-def sam_segmentation(predictor, rawspace_coords, n_input_points=20):
+def sam_segmentation(predictor, rawspace_coords, manual_mask, n_input_points=20):
     min_x = np.min([x[0] for x in rawspace_coords])
     max_x = np.max([x[0] for x in rawspace_coords])
     min_y = np.min([x[1] for x in rawspace_coords])
@@ -154,9 +153,18 @@ def sam_segmentation(predictor, rawspace_coords, n_input_points=20):
                                     multimask_output=False,
                                    )
 
-    return mask[0,...]
+    return masks[0,...]
 
 
+def get_radiance_link(fid):
+    # Get Radiance link
+    l1b_rad = glob.glob(f'/beegfs/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid.split("_")[0]}/l1b/EMIT_L1B_RAD*_cnm.out')
+    if len(l1b_rad) > 0:
+        l1b_rad = os.path.basename(l1b_rad[0]).split('.')[0][:-20]
+        l1b_link = f'https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/EMITL1BRAD.001/{l1b_rad}/{l1b_rad}.nc'
+    else:
+        l1b_link = f'Scene Not Yet Available'
+    return l1b_link
           
 
 
@@ -231,7 +239,6 @@ def main(input_args=None):
             rawdat = envi.open(f'methane_20221121/{fid.split("_")[0]}_{args.type}_mf.hdr').open_memmap(interleave='bip').copy()
             ds = gdal.Open(f'methane_20221121/{fid.split("_")[0]}_{args.type}_mf')
 
-
             # scaled and colored image
             if args.style == 'sam':
                 prep_predictor_image(predictor, rawdat) 
@@ -253,12 +260,12 @@ def main(input_args=None):
             plume_labels = np.zeros(rawshape) # labels of individual plumes in fid
             for newp in new_plumes_in_fid:
                 feat = manual_annotations['features'][newp]
-                rawspace_coords = rawspace_coordinate_conversion(glt, feat['geometry']['coordinates'][0])
+                rawspace_coords = rawspace_coordinate_conversion(glt, feat['geometry']['coordinates'][0], trans)
                 manual_mask = rasterize(shapes=[Polygon(rawspace_coords)], out_shape=rawshape) # numpy binary mask for manual IDs
 
                 # Do segmenation
                 if args.style == 'sam':
-                    local_sam_mask = sam_segmetnation(predictor, rawspace_coords)
+                    local_sam_mask = sam_segmentation(predictor, rawspace_coords, manual_mask)
 
                     full_fid_mask += local_sam_mask
                     plume_labels[local_sam_mask == 1] = newp + np.max(plume_labels)
@@ -295,26 +302,12 @@ def main(input_args=None):
                     logging.warn('ACK - We couldnt find an intersection')
 
                 print(manual_matches['features'][0]['properties'])
-                #plume_polygons[str(poly_feat['properties']['DN'])] = {'geometry': poly_feat['geometry'], 
-                #                                                      'Plume ID': manual_matches['features'][0]['properties']['Plume ID'], 
-                #                                                      'R1 - VISIONS': manual_matches['features'][0]['properties']['R1 - VISIONS'],
-                #                                                      'Time Identified': manual_matches['features'][0]['properties']['Time Created'],
-                #                                                      }
                 plume_polygons[str(poly_feat['properties']['DN'])] = {'geometry': poly_feat['geometry']}
                 for ppk,ppi in manual_matches['features'][0]['properties'].items():
                     plume_polygons[ppk] = ppi
 
-                # add metadata from the mathed plume
 
-
-
-            # Get Radiance link
-            l1b_rad = glob.glob(f'/beegfs/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid.split("_")[0]}/l1b/EMIT_L1B_RAD*_cnm.out')
-            if len(l1b_rad) > 0:
-                l1b_rad = os.path.basename(l1b_rad[0]).split('.')[0][:-20]
-                l1b_link = f'https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/EMITL1BRAD.001/{l1b_rad}/{l1b_rad}.nc'
-            else:
-                l1b_link = f'Scene Not Yet Available'
+            l1b_link = get_radiance_link(fid)
 
             proj_ds = gdal.Warp('', glt_file, dstSRS='EPSG:3857', format='VRT')
             transform_3857 = proj_ds.GetGeoTransform()
@@ -327,7 +320,6 @@ def main(input_args=None):
 
             un_labels = np.unique(plume_labels)[1:]
             background = np.round(np.nanstd(rawdat[plume_labels == 0]))
-            loclist = []
             start_datetime = datetime.datetime.strptime(fid[4:], "%Y%m%dt%H%M%S")
             end_datetime = start_datetime + datetime.timedelta(seconds=1)
 
@@ -355,53 +347,52 @@ def main(input_args=None):
                 ime = np.round(ime,2)
                 ime_uncert = np.round(np.sum(plume_labels == lab) * background * ime_scaler,2)
 
-
-                y_locs = np.where(np.sum(plume_labels == lab, axis=1))[0]
-                x_locs = np.where(np.sum(plume_labels == lab, axis=0))[0]
-                radius = np.sqrt( ((y_locs[0] - y_locs[-1])*trans[5])**2 + ((x_locs[0] - x_locs[-1])*trans[1])**2)/2.
-                center_y = trans[3] + trans[5] * (y_locs[0] + (y_locs[-1]-y_locs[0])/2)
-                center_x = trans[0] + trans[1] * (x_locs[0] + (x_locs[-1]-x_locs[0])/2)
-
-                point = shapely.geometry.Point(center_x, center_y)
-                circle = shapely.geometry.polygon.Polygon(point.buffer(radius))
-
-
-                #loclist.append(rawloc)
                 max_loc_y = trans[3] + trans[5]*(rawloc[0][0]+0.5)
                 max_loc_x = trans[0] + trans[1]*(rawloc[1][0]+0.5)
-                #loc_z = 0
 
                 content_props = {"UTC Time Observed": start_datetime, 
-                                              "map_endtime": end_datetime,
-                                              "Max Plume Concentration (ppm m)": maxval,
-                                              "Concentration Uncertainty (ppm m)": background,
-                                              #"Integrated Methane Enhancement (kg CH4)": ime,
-                                              #"Integrated Methane Enhancement - Positive (kg CH4)": ime_p,
-                                              #"Integrated Methane Enhancement Uncertainty (kg CH4)": ime_uncert,
-                                              "Latitude of max concentration": max_loc_y,
-                                              "Longitude of max concentration": max_loc_x,
-                                              "Scene FID": fid,
-                                              "L1B Radiance Download": l1b_link
+                                 "map_endtime": end_datetime,
+                                 "Max Plume Concentration (ppm m)": maxval,
+                                 "Concentration Uncertainty (ppm m)": background,
+                                 #"Integrated Methane Enhancement (kg CH4)": ime,
+                                 #"Integrated Methane Enhancement - Positive (kg CH4)": ime_p,
+                                 #"Integrated Methane Enhancement Uncertainty (kg CH4)": ime_uncert,
+                                 "Latitude of max concentration": max_loc_y,
+                                 "Longitude of max concentration": max_loc_x,
+                                 "Scene FID": fid,
+                                 "L1B Radiance Download": l1b_link
                                  }
                 if plume_polygons is not None:
                     props = content_props.copy()
                     loc_pp = plume_polygons[str(int(lab))]
                     props['Plume ID'] = loc_pp['Plume ID']
 
+                    # For R1 Review
+                    if not loc_pp['R1 - Reviewed']:
+                        props['style'] = {"maxZoom": 20, "minZoom": 0, "color": "red", 'opacity': 1, 'weight': 2, 'fillOpacity': 0}
                     
-                    #props['R1 - VISIONS'] = loc_pp['R1 - VISIONS']
-                    #props['Reviewer 2 Approval'] = loc_pp['Reviewer 2 Approval']
-                    #props['Time Identified'] = loc_pp['Time Identified']
-                    if loc_pp['R1 - VISIONS']:# and loc_pp['Reviewer 2 Approval']:
-                        props['style'] = {"maxZoom": 20, "minZoom": 0, "color": "white", 'opacity': 1, 'weight': 2, 'fillOpacity': 0}
-                    #elif loc_pp['R1 - VISIONS']:
-                        #props['style'] = {"maxZoom": 20, "minZoom": 0, "color": "white", 'opacity': 1, 'weight': 2, 'fillOpacity': 0}
-                    else:
+                    # For R2 Review
+                    if loc_pp['R1 - Reviewed'] and loc_pp['R1 - VISIONS'] and not loc_pp['R2 - Reviewed']:
+                        props['style'] = {"maxZoom": 20, "minZoom": 0, "color": "purple", 'opacity': 1, 'weight': 2, 'fillOpacity': 0}
+
+                    # Accept
+                    if loc_pp['R1 - Reviewed'] and loc_pp['R1 - VISIONS'] and loc_pp['R2 - Reviewed'] and loc_pp['R2 - VISIONS']:
                         props['style'] = {"maxZoom": 20, "minZoom": 0, "color": "green", 'opacity': 1, 'weight': 2, 'fillOpacity': 0}
+                    
+                    # Reject
+                    if (loc_pp['R1 - Reviewed'] and not loc_pp['R1 - VISIONS']) or (loc_pp['R2 - Reviewed'] and not loc_pp['R2 - VISIONS']):
+                        props['style'] = {"maxZoom": 20, "minZoom": 0, "color": "yellow", 'opacity': 1, 'weight': 2, 'fillOpacity': 0}
+
                     loc_res = {"geometry": loc_pp['geometry'],
                                "type": "Feature",
                                "properties": props}
 
+                    props['style']['radius'] = 10
+                    point_res = {"geometry": {"coordinates": [max_loc_x, max_loc_y, 0.0], "type": "Point"},
+                               "properties": props,
+                               "type": "Feature"}
+
+                    # First add in polygon
                     existing_match_index = [_x for _x, x in enumerate(outdict['features']) if props['Plume ID'] == x['properties']['Plume ID'] and x['geometry']['type'] != 'Point']
                     if len(existing_match_index) > 2:
                         logging.warn("HELP! Too many matching indices")
@@ -410,21 +401,14 @@ def main(input_args=None):
                     else:
                         outdict['features'].append(loc_res)
                 
-                    props = content_props.copy()
-                    props['style'] = {"radius": 10, 'minZoom': 0, "maxZoom": 9, "color": "blue", 'opacity': 1, 'weight': 2, 'fillOpacity': 0}
-                    props['Plume ID'] = loc_pp['Plume ID']
-                    #loc_res = {"geometry": {"coordinates": [center_x, center_y, 0.0], "type": "Point"},
-                    loc_res = {"geometry": {"coordinates": [max_loc_x, max_loc_y, 0.0], "type": "Point"},
-                               "properties": props,
-                               "type": "Feature"}
-                    outdict['features'].append(loc_res)
+                    # Now add in point
                     existing_match_index = [_x for _x, x in enumerate(outdict['features']) if props['Plume ID'] == x['properties']['Plume ID'] and x['geometry']['type'] == 'Point']
                     if len(existing_match_index) > 2:
                         logging.warn("HELP! Too many matching indices")
                     if len(existing_match_index) > 0:
-                        outdict['features'][existing_match_index[0]] = loc_res
+                        outdict['features'][existing_match_index[0]] = point_res
                     else:
-                        outdict['features'].append(loc_res)
+                        outdict['features'].append(point_res)
 
             # Write JSON to output file
             outdict['crs']['properties']['last_updated'] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
