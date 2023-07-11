@@ -38,7 +38,7 @@ class SerialEncoder(json.JSONEncoder):
 
 
 def write_science_cog(output_img, output_file, geotransform, projection):
-    tmp_file = os.path.split(output_file)[0] + '_tmp.tif'
+    tmp_file = os.path.splitext(output_file)[0] + '_tmp.tif'
     driver = gdal.GetDriverByName('GTiff')
     driver.Register()
     outDataset = driver.Create(tmp_file,output_img.shape[1],output_img.shape[0],1,gdal.GDT_Float32,options = ['COMPRESS=LZW'])
