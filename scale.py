@@ -49,7 +49,7 @@ def main(input_args=None):
     parser.add_argument('input_file', type=str,  metavar='INPUT', help='path to input image')   
     parser.add_argument('output_file', type=str,  metavar='OUTPUT', help='path to input image')   
     parser.add_argument('bounds', type=float,  nargs=2, metavar='SCALING RANGE', help='path to input image')   
-    parser.add_argument('--cmap', type=str,  default=None, choices=['plasma'], metavar='COLOR_SCALE', help='color scale to apply')   
+    parser.add_argument('--cmap', type=str,  default=None, choices=['plasma','YlOrRd'], metavar='COLOR_SCALE', help='color scale to apply')   
     args = parser.parse_args(input_args)
 
 
@@ -58,6 +58,7 @@ def main(input_args=None):
     dat[dat == ds.GetRasterBand(1).GetNoDataValue()] = np.nan
 
     print(args.cmap)
+    print(f'scsaling bounds: {args.bounds}')
     if args.cmap is None:
         dat -= args.bounds[0]
         dat /= (args.bounds[1] - args.bounds[0])
@@ -74,9 +75,13 @@ def main(input_args=None):
         isnan = np.isnan(dat)
         dat[dat <= 0] = 0.01
         dat[isnan] = 0
+        mask = dat == 0
         if args.cmap == 'plasma':
             dat = plt.cm.plasma(dat)[...,:3]
+        elif args.cmap == 'YlOrRd':
+            dat = plt.cm.YlOrRd(dat)[...,:3]
         dat = np.round(dat * 255).astype(np.uint8)
+        dat[np.logical_not(mask),:] = np.maximum(1, dat[np.logical_not(mask),:])
         dat[isnan,:] = 0
 
     write_output_file(ds, dat, args.output_file)

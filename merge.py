@@ -30,21 +30,22 @@ def main(input_args=None):
 
     outdict = json.load(open(first_file,'r'))
 
-    plume_count = 0 
     for sf in source_files:
         loc = json.load(open(sf,'r'))
-        for lf in loc['features']:
-            if lf['geometry']['type'] == 'Polygon':
-                lf['properties']['plume_complex_count'] = plume_count + 1
-                plume_count +=1
-            else:
-                lf['properties']['plume_complex_count'] = plume_count
+        outdict['features'].extend(loc['features'])
         #for _feat, feat in enumerate(loc['features']):
         #    feat['properties']['style'] = {'color': 'green', 'opacity': 1, 'weight': 2, 'fillOpacity': 0, 'maxZoom': 10, 'minZoom': 0}
         #    #del feat['vis_style']
         #    loc[_feat] = feat
+
+    plume_count = 0 
+    for lf in outdict['features']:
+        if lf['geometry']['type'] == 'Polygon':
+            lf['properties']['plume_complex_count'] = plume_count + 1
+            plume_count +=1
+        else:
+            lf['properties']['plume_complex_count'] = plume_count
             
-        outdict['features'].extend(loc['features'])
     outdict['crs']['properties']['latest_update'] = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
 
     

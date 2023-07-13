@@ -37,6 +37,23 @@ class SerialEncoder(json.JSONEncoder):
 
 
 
+def write_science_cog(output_img, output_file, geotransform, projection):
+    tmp_file = os.path.splitext(output_file)[0] + '_tmp.tif'
+    driver = gdal.GetDriverByName('GTiff')
+    driver.Register()
+    outDataset = driver.Create(tmp_file,output_img.shape[1],output_img.shape[0],1,gdal.GDT_Float32,options = ['COMPRESS=LZW'])
+    outDataset.GetRasterBand(1).WriteArray(output_img)
+    outDataset.GetRasterBand(1).SetNoDataValue(-9999)
+    outDataset.SetProjection(projection)
+    outDataset.SetGeoTransform(geotransform)
+    del outDataset
+
+    subprocess.call(f'sh /home/brodrick/bin/cog.sh {tmp_file} {output_file}',shell=True)
+    subprocess.call(f'rm {tmp_file}',shell=True)
+    
+
+
+
 def write_output_file(source_ds, output_img, output_file):
     driver = gdal.GetDriverByName('GTiff')
     driver.Register()
@@ -55,16 +72,20 @@ def write_output_file(source_ds, output_img, output_file):
 
 
 
-def plume_mask(input: np.array, pm):
+def plume_mask(input: np.array, pm, style='ch4'):
 
     y_locs = np.where(np.sum(pm > 0, axis=1))[0]
     x_locs = np.where(np.sum(pm > 0, axis=0))[0]
 
-    plume_dat = input[y_locs[0]:y_locs[-1],x_locs[0]:x_locs[-1]]
+    plume_dat = input[y_locs[0]:y_locs[-1],x_locs[0]:x_locs[-1]].copy()
     plume_dat[pm[y_locs[0]:y_locs[-1],x_locs[0]:x_locs[-1]] == 0] = 0
     
-    plume_dat = gauss_blur(plume_dat, 3, preserve_nans=False)
-    local_output_mask = plume_dat > 50
+    if style == 'ch4':
+        plume_dat = gauss_blur(plume_dat, 3, preserve_nans=False)
+        local_output_mask = plume_dat > 50
+    else:
+        plume_dat = gauss_blur(plume_dat, 5, preserve_nans=False)
+        local_output_mask = plume_dat > 10000
     
     output_plume_mask = np.zeros(pm.shape,dtype=bool)
     output_plume_mask[y_locs[0]:y_locs[-1],x_locs[0]:x_locs[-1]] = local_output_mask
@@ -104,6 +125,7 @@ def main(input_args=None):
     parser.add_argument('-output_mask', type=str,  default=None, metavar='output mask', help='path to output mask image')   
     parser.add_argument('-vmax', type=float, nargs=1, default=1500)
     parser.add_argument('-blur_sigma', type=float, default=0)
+    parser.add_argument('-daac_demo_dir', type=str, default=None)
     args = parser.parse_args(input_args)
     
 
@@ -128,14 +150,22 @@ def main(input_args=None):
     #igm = igm_ds.ReadAsArray().transpose((1,2,0))
 
     # Create Mask
+    if args.daac_demo_dir is not None:
+        out_l2b_name = os.path.join(args.daac_demo_dir, 'l2b', os.path.splitext(os.path.basename(args.gltfile).replace('glt','ch4mf'))[0] + '_mv0.tif')
+        write_science_cog(single_image_ortho(dat.reshape((dat.shape[0],dat.shape[1],1)), glt)[...,0], out_l2b_name, glt_ds.GetGeoTransform(), glt_ds.GetProjection())
+
     dat[dat == ds.GetRasterBand(1).GetNoDataValue()] = np.nan
     plume, plume_labels = plume_mask(dat, input_plume_mask)
 
     # Make the output colored plume image
     rawdat = dat.copy()
+    background = np.round(np.nanstd(rawdat[np.logical_and(np.logical_not(plume), rawdat != -9999) ]))
+    rawdat[np.logical_not(plume)] = -9999
+    print(f'rawdat 0: {np.sum(rawdat == 0)}')
     dat[np.logical_not(plume)] = np.nan
     dat = gauss_blur(dat, args.blur_sigma)   
     dat[np.logical_not(plume)] = 0
+    print(f'rawdat 0: {np.sum(rawdat == 0)}')
 
     dat /= 1500
     dat[dat > 1] = 1
@@ -155,11 +185,18 @@ def main(input_args=None):
 
     
     rawshape = (rawdat.shape[0],rawdat.shape[1],1)
+    print(f'rawdat 0: {np.sum(rawdat == 0)}')
     rawdat = single_image_ortho(rawdat.reshape(rawshape), glt)[...,0]
+    print(f'rawdat 0: {np.sum(rawdat == 0)}, {rawdat[1570, 934]}')
     plume_labels = single_image_ortho(plume_labels.reshape(rawshape), glt)[...,0]
+
+
     plume_labels[plume_labels == -9999] = 0
     rawdat[rawdat == -9999] = np.nan
+    print(f'rawdat 0: {np.sum(rawdat == 0)}, {rawdat[1570, 934]}')
     #rawdat[rawdat < 0] = 0
+
+
     
     write_output_file(glt_ds, colorized, args.output_file)
     plume_polygons = None
@@ -210,12 +247,11 @@ def main(input_args=None):
     # Make output vector
     outdict = {"crs": {"properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84"}, "type": "name"},"features":[],"name":"methane_metadata","type":"FeatureCollection" }
     un_labels = np.unique(plume_labels)[1:]
-    background = np.round(np.nanstd(rawdat[plume_labels == 0]))
     loclist = []
-    for lab in un_labels:
+    for _lab, lab in enumerate(un_labels):
         
         maxval = np.nanmax(rawdat[plume_labels == lab])
-        if np.sum(plume_labels == lab) < 5 or maxval < 200:
+        if np.sum(plume_labels == lab) < 15 or maxval < 200:
             continue
 
         rawloc = np.where(np.logical_and(rawdat == maxval, plume_labels == lab))
@@ -249,6 +285,21 @@ def main(input_args=None):
         #loclist.append(rawloc)
         max_loc_y = trans[3] + trans[5]*(rawloc[0][0]+0.5)
         max_loc_x = trans[0] + trans[1]*(rawloc[1][0]+0.5)
+
+
+        if args.daac_demo_dir is not None:
+            out_l3_name = os.path.join(args.daac_demo_dir, 'l3', os.path.splitext(os.path.basename(args.gltfile).replace('glt','ch4mf'))[0] + f'_mv0_p{_lab}.tif')
+            outl3 = rawdat[y_locs[0]:y_locs[-1],x_locs[0]:x_locs[-1]].copy()
+            outl3[np.isnan(outl3)] = -9999
+            outtrans = list(glt_ds.GetGeoTransform()).copy()
+            outtrans[0] += x_locs[0] * outtrans[1]
+            outtrans[3] += y_locs[0] * outtrans[5]
+            print(_lab, x_locs[0], y_locs[0])
+
+            write_science_cog(outl3, out_l3_name, outtrans, glt_ds.GetProjection())
+
+
+
         #loc_z = 0
 
         #lloc = igm[rawloc[0][0], rawloc[1][0],:].tolist()
