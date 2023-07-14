@@ -32,7 +32,6 @@ from utils import envi_header
 from sklearn.cluster import MiniBatchKMeans
 import ray
 import logging
-import pdb
 
 ppmscaling = 100000.0
 CH4_WL = [2137, 2493]
