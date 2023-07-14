@@ -32,6 +32,7 @@ from utils import envi_header
 from sklearn.cluster import MiniBatchKMeans
 import ray
 import logging
+import pdb
 
 ppmscaling = 100000.0
 CH4_WL = [2137, 2493]
@@ -58,7 +59,7 @@ def main(input_args=None):
     parser.add_argument('radiance_file', type=str,  metavar='INPUT', help='path to input image')   
     parser.add_argument('library', type=str,  metavar='LIBRARY', help='path to target library file')
     parser.add_argument('output', type=str,  metavar='OUTPUT', help='path for output image (mf ch4 ppm)')    
-    parser.add_argument('mask_file', type=str,  metavar='MASK_VILE', help='path to the band mask file')    
+    parser.add_argument('l1b_bandmask_file', type=str,  metavar='MASK_FILE', help='path to the l1b bandmask file')    
     parser.add_argument('l2a_mask_file', type=str,  help='path to l2a mask image')   
     args = parser.parse_args(input_args)
 
@@ -72,16 +73,6 @@ def main(input_args=None):
 
     baseoutfile = args.output 
     baseoutfilehdr = envi_header(baseoutfile)
-
-    bandmask_loaded = envi.open(envi_header(args.mask_file))[:,:,:]
-    bandmask_unpacked = np.unpackbits(bandmask_loaded, axis= -1)
-    mask_summed = np.sum(bandmask_unpacked, axis = -1)
-    mask_norm = mask_summed - np.min(mask_summed, axis = 0)
-    # True for pixels that should be used, False for those that are to be excluded
-    umask_dilated = scipy.ndimage.binary_dilation(mask_norm != 0, iterations = 10) < 1
-
-    # Clouds and water
-    l2a_mask = np.sum(envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')[...,:3],axis=-1) > 0
 
     # columnwise spectral averaging function
     colavgfn = np.mean
@@ -109,19 +100,30 @@ def main(input_args=None):
 
     img_mm = img.open_memmap(interleave='source',writeable=False)[:,active[0]-1:active[1],:]
 
+    # Generate good pixel mask by excluding: saturated pixels, clouds, surface water, and
+    # unsaturated flares (pixels where channel 270, or 2389.486 nm, exceeds a threshold)
+    l1b_bandmask_loaded = envi.open(envi_header(args.l1b_bandmask_file))[:,:,:]
+    l1b_bandmask_unpacked = np.unpackbits(l1b_bandmask_loaded, axis= -1)
+    l1b_bandmask_summed = np.sum(l1b_bandmask_unpacked, axis = -1)
+    saturation_mask = l1b_bandmask_summed - np.min(l1b_bandmask_summed, axis = 0)
+    # True for pixels that should be used, False for those that are to be excluded
+    #saturation_mask_dilated = scipy.ndimage.binary_dilation(saturation_mask != 0, iterations = 10) < 1
+    good_pixel_mask = scipy.ndimage.binary_dilation(saturation_mask != 0, iterations = 10) < 1
+
     # Make flare mask
     wavelenths_active = wavelengths[active[0]-1:active[1]]
     # Flare masking is done on native channel 270, or 2389.486 nm
     b270_idx = np.argmin(np.abs(wavelenths_active - 2389.486)) 
-    hot = np.where(np.logical_and(img_mm[:,b270_idx,:] > 1.5, umask_dilated == True), 1., 0.)
-    hot_dilated = scipy.ndimage.uniform_filter(hot, [5,5]) > 0.01
-    umask_dilated = np.where(hot_dilated, False, umask_dilated)
+    hot_mask = np.where(np.logical_and(img_mm[:,b270_idx,:] > 1.5, good_pixel_mask == True), 1., 0.)
+    hot_mask_dilated = scipy.ndimage.uniform_filter(hot_mask, [5,5]) > 0.01
+    good_pixel_mask = np.where(hot_mask_dilated, False, good_pixel_mask)
     
     # Clouds and water
-    umask_dilated = np.where(l2a_mask, False, umask_dilated)
+    clouds_and_surface_water_mask = np.sum(envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')[...,:3],axis=-1) > 0
+    good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
 
     # Fraction of lines in each cross track column that are used in the MF cov and mu estimation
-    umask_column_fraction = np.sum(umask_dilated, axis = 0) / umask_dilated.shape[0]
+    umask_column_fraction = np.sum(good_pixel_mask, axis = 0) / good_pixel_mask.shape[0]
 
     # load the gas spectrum
     libdata = np.float64(np.loadtxt(args.library))
@@ -208,7 +210,7 @@ def main(input_args=None):
     img_mm_id = ray.put(img_mm.copy())
     abscf_id = ray.put(abscf)
 
-    jobs = [mf_one_column.remote(col,img_mm_id, bgminsamp, outimg_shp, bgimg_shp, abscf_id, umask_dilated, args) for col in np.arange(ncols)]
+    jobs = [mf_one_column.remote(col,img_mm_id, bgminsamp, outimg_shp, bgimg_shp, abscf_id, good_pixel_mask, args) for col in np.arange(ncols)]
     
     rreturn = [ray.get(jid) for jid in jobs]
     outimg_mm = outimg.open_memmap(interleave='source',writable=True)
@@ -345,7 +347,7 @@ def looshrinkage(I_zm,alphas,nll,n,I_reg=[]):
 
 
 @ray.remote
-def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf, umask_dilated, args):
+def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf, good_pixel_mask, args):
 
 
     logging.basicConfig(format='%(levelname)s:%(asctime)s ||| %(message)s', level=args.loglevel,
@@ -432,9 +434,9 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, bgimg_mm_shape, abscf
         Icol_ki = (Icol if bgmodes == 1 else Icol[kmask,:]).copy()     
 
         # Create array without masked pixels for use in mean and covariance estimation only
-        Icol_ki_for_mu_C = Icol[umask_dilated[use,col], :].copy()
+        Icol_ki_for_mu_C = Icol[good_pixel_mask[use,col], :].copy()
         if bgmodes != 1:
-            kmask_mask = kmask[umask_dilated[use,col]]
+            kmask_mask = kmask[good_pixel_mask[use,col]]
             Icol_ki_for_mu_C = Icol_ki_for_mu_C[kmask_mask,:].copy()
 
         if Icol_ki_for_mu_C.shape[0] <= Icol_ki_for_mu_C.shape[1]:
