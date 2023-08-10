@@ -5,6 +5,7 @@ import numpy as np
 import json
 import glob
 import datetime
+import time
 import subprocess
 from segment_anything import sam_model_registry, SamPredictor
 from spectral.io import envi
@@ -17,9 +18,34 @@ from apply_glt import single_image_ortho
 from masked_plume_delineator import write_output_file
 from skimage.draw import polygon
 from rasterio.features import rasterize
-from masked_plume_delineator import plume_mask
 import logging
 import matplotlib.pyplot as plt
+from masked_plume_delineator import gauss_blur
+
+
+
+def plume_mask_threshold(input: np.array, pm, style='ch4'):
+
+    y_locs = np.where(np.sum(pm > 0, axis=1))[0]
+    x_locs = np.where(np.sum(pm > 0, axis=0))[0]
+
+    plume_dat = input[y_locs[0]:y_locs[-1],x_locs[0]:x_locs[-1]].copy()
+    plume_dat[pm[y_locs[0]:y_locs[-1],x_locs[0]:x_locs[-1]] == 0] = 0
+    
+    local_output_mask = None
+    if style == 'ch4':
+        plume_dat = gauss_blur(plume_dat, 3, preserve_nans=False)
+        local_output_mask = plume_dat > 50
+    else:
+        plume_dat = gauss_blur(plume_dat, 5, preserve_nans=False)
+        local_output_mask = plume_dat > 10000
+    
+    output_plume_mask = np.zeros(pm.shape,dtype=bool)
+    output_plume_mask[y_locs[0]:y_locs[-1],x_locs[0]:x_locs[-1]] = local_output_mask
+    
+    return output_plume_mask
+
+
 
 def roi_filter(coverage, roi):
     subdir = deepcopy(coverage)
@@ -59,29 +85,52 @@ def add_fids(manual_annotations, coverage, manual_annotations_previous):
 
     previous_plume_ids = []
     if manual_annotations_previous is not None:
-        previous_plume_ids = [x['properties']['name'] for x in manual_annotations_previous['features']]
+        previous_plume_ids = [x['properties']['Plume ID'] for x in manual_annotations_previous['features']]
 
     updated_plumes=[]
+    todel=[]
     for _feat, feat in enumerate(manual_annotations['features']):
-        plume_id = feat['properties']['name']
+        # If this key isn't present, then the full feature wasn't really added yet
+        if 'R1 - Reviewed' not in feat['properties'].keys():
+            todel.append(_feat)
+            continue # This is insufficient
+        plume_id = feat['properties']['Plume ID']
         if plume_id in previous_plume_ids:
             new_geom = feat['geometry']['coordinates']
             prev_idx = previous_plume_ids.index(plume_id)
             prev_geom = manual_annotations_previous['features'][prev_idx]['geometry']['coordinates']
-            if new_geom == prev_geom:
+
+            # check reviews
+            rev_match = True
+            for rl in ['R1 - Reviewed','R2 - Reviewed','R1 - VISIONS','R2 - VISIONS']:
+                if feat['properties'][rl] != manual_annotations_previous['features'][prev_idx]['properties'][rl]:
+                    rev_match = False
+
+            if new_geom == prev_geom and rev_match:
                 manual_annotations_fid['features'][_feat] = manual_annotations_previous['features'][prev_idx]
                 continue
 
-        subset_coverage = time_filter(roi_filter(coverage, Polygon(feat['geometry']['coordinates'][0])), feat['properties']['Time Range Start'], feat['properties']['Time Range End'])
+        subset_coverage = roi_filter(time_filter(coverage, feat['properties']['Time Range Start'], feat['properties']['Time Range End']), Polygon(feat['geometry']['coordinates'][0]))
         fid = subset_coverage['features'][0]['properties']['fid'].split('_')[0]
-        manual_annotations_fid['features'][_feat]['fid'] = fid
-        manual_annotations_fid['features'][_feat]['properties']['Plume ID'] =manual_annotations_fid['features'][_feat]['properties'].pop('name')
+        manual_annotations_fid['features'][_feat]['properties']['fid'] = fid
         updated_plumes.append(_feat)
+
+    for td in np.array(todel)[::-1]:
+        msg = f'Deleting entry due to bad metadata - check input {manual_annotations_fid["features"][td]}'
+        logging.warn(msg)
+        del manual_annotations_fid['features'][td]
+
+    updated_plumes = np.array([x for x in updated_plumes if x not in todel])
+    for td in todel:
+        updated_plumes[updated_plumes > td] -= 1
+    updated_plumes = updated_plumes.tolist()
+
     return manual_annotations_fid, updated_plumes
 
-def write_color_plume(rawdat, plumes_mask, glt, glt_ds, outname: str, style = 'ch4'):
+def write_color_plume(rawdat, plumes_mask, glt_ds, outname: str, style = 'ch4'):
 
     dat = rawdat.copy()
+    #dat = single_image_ortho(dat.reshape(dat.shape[0],dat.shape[1],1), glt).squeeze()
     colorized = np.zeros((dat.shape[0],dat.shape[1],3))
 
     dat[np.logical_not(plumes_mask)] = 0
@@ -104,7 +153,6 @@ def write_color_plume(rawdat, plumes_mask, glt, glt_ds, outname: str, style = 'c
     colorized = np.round(colorized * 255).astype(np.uint8)
     colorized[plumes_mask,:] = np.maximum(1, colorized[plumes_mask,:])
 
-    colorized = single_image_ortho(colorized, glt)
     write_output_file(glt_ds, colorized, outname)
 
 
@@ -122,14 +170,18 @@ def prep_predictor_image(predictor, data, ptype):
 
     predictor.set_image(oi)
 
-def rawspace_coordinate_conversion(glt, coordinates, trans):
+def rawspace_coordinate_conversion(glt, coordinates, trans, ortho=False):
     rawspace_coords = []
     for ind in coordinates:
         glt_ypx = int(round((ind[1] - trans[3])/ trans[5]))
         glt_xpx = int(round((ind[0] - trans[0])/ trans[1]))
-        lglt = glt[glt_ypx, glt_xpx,:]
-        rawspace_coords.append(lglt.tolist())
+        if ortho:
+            rawspace_coords.append([glt_xpx,glt_ypx])
+        else:
+            lglt = glt[glt_ypx, glt_xpx,:]
+            rawspace_coords.append(lglt.tolist())
     return rawspace_coords
+
 
 def sam_segmentation(predictor, rawspace_coords, manual_mask, n_input_points=20):
     min_x = np.min([x[0] for x in rawspace_coords])
@@ -173,7 +225,6 @@ def main(input_args=None):
     parser.add_argument('key', type=str,  metavar='INPUT_DIR', help='input directory')   
     parser.add_argument('id', type=str,  metavar='INPUT_DIR', help='input directory')   
     parser.add_argument('out_dir', type=str,  metavar='INPUT_DIR', help='input directory')   
-    parser.add_argument('-style', type=str,  choices=['classic','sam'], default='classic')   
     parser.add_argument('--type', type=str,  choices=['ch4','co2'], default='ch4')   
     parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')    
@@ -194,11 +245,15 @@ def main(input_args=None):
         logging.debug('Loading Data')
         previous_annotation_file = os.path.join(args.out_dir, "previous_manual_annotation.json")
         annotation_file = os.path.join(args.out_dir, "manual_annotation.json")
-        subprocess.call(f'curl "https://popo.jpl.nasa.gov/mmgis/API/files/getfile" -H "Authorization:Bearer {args.key}" --data-raw "id={args.id}" > {annotation_file}',shell=True)
+        subprocess.call(f'/beegfs/scratch/brodrick/miniconda/envs/isofit_env/bin/curl "https://popo.jpl.nasa.gov/mmgis/API/files/getfile" -H "Authorization:Bearer {args.key}" --data-raw "id={args.id}" > {annotation_file}',shell=True)
         manual_annotations = json.load(open(annotation_file,'r'))['body']['geojson']
+        for _feat in range(len(manual_annotations['features'])):
+            manual_annotations['features'][_feat]['properties']['Plume ID'] = manual_annotations['features'][_feat]['properties'].pop('name')
+
+
         manual_annotations_previous = None
         if os.path.isfile(previous_annotation_file):
-            manual_annotations_previous = json.load(open(previous_annotation_file,'r'))['body']['geojson']
+            manual_annotations_previous = json.load(open(previous_annotation_file,'r'))
 
         coverage = json.load(open(args.track_coverage_file,'r'))
 
@@ -208,22 +263,18 @@ def main(input_args=None):
         if os.path.isfile(output_json):
             outdict = json.load(open(output_json,'r'))
 
-        # Preload SAM model if needed
-        if args.style == 'sam':
-            sam_checkpoint = "sam_vit_h_4b8939.pth"
-            model_type = "vit_h"
-            sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-            #sam.to(device=device)
-            predictor = SamPredictor(sam)
 
         # Step through each new plume
         manual_annotations, new_plumes = add_fids(manual_annotations, coverage, manual_annotations_previous)
-        print(new_plumes)
-        new_plume_fids = [manual_annotations['features'][x]['fid'] for x in new_plumes]
+        # Dump out the udpated manual annotations set, so it holds FIDs for next round
+        with open(annotation_file, 'w') as fout:
+            fout.write(json.dumps(manual_annotations, cls=SerialEncoder)) 
+
+        new_plume_fids = np.unique([manual_annotations['features'][x]['properties']['fid'] for x in new_plumes]).tolist()
 
         # If there's nothing new, sleep and retry
         if len(new_plumes) == 0:
-            time.sleep(5)
+            time.sleep(10)
             continue
 
         # Narrow down the new plumes to the set of unique FIDS, so we step through scene by scene
@@ -231,20 +282,20 @@ def main(input_args=None):
         for fid in unique_fids:
 
             # Get just the plumes that are in this FID
-            new_plumes_in_fid = [x for x in new_plumes if manual_annotations['features'][x]['fid'] == fid]
+            #new_plumes_in_fid = [x for x in new_plumes if manual_annotations['features'][x]['fid'] == fid]
+            plumes_in_fid = [x for x in range(len(manual_annotations['features'])) if manual_annotations['features'][x]['properties']['fid'] == fid]
+            
             this_fid_manual_annotations = deepcopy(manual_annotations)
-            this_fid_manual_annotations['features'] = [this_fid_manual_annotations['features'][x] for x in new_plumes_in_fid]
+            #this_fid_manual_annotations['features'] = [this_fid_manual_annotations['features'][x] for x in new_plumes_in_fid]
+            this_fid_manual_annotations['features'] = [this_fid_manual_annotations['features'][x] for x in plumes_in_fid]
 
             # Open up the relevant MF data
             rawdat = envi.open(f'methane_20221121/{fid.split("_")[0]}_{args.type}_mf.hdr').open_memmap(interleave='bip').copy()
             ds = gdal.Open(f'methane_20221121/{fid.split("_")[0]}_{args.type}_mf')
 
-            # scaled and colored image
-            if args.style == 'sam':
-                prep_predictor_image(predictor, rawdat) 
-
             rawdat = rawdat.squeeze()
             rawdat[rawdat == ds.GetRasterBand(1).GetNoDataValue()] = np.nan
+            rawshape = (rawdat.shape[0],rawdat.shape[1])
 
             # Load GLT
             glt_file = glob.glob(f'/beegfs/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid.split("_")[0]}/l1b/*_glt_b0106_v01.img')[0]
@@ -252,59 +303,87 @@ def main(input_args=None):
             glt = glt_ds.ReadAsArray().transpose((1,2,0))
             trans = glt_ds.GetGeoTransform()
 
-            rawshape = (rawdat.shape[0],rawdat.shape[1])
-
+            # ortho rawdat
+            ort_rawdat = single_image_ortho(rawdat.reshape((rawshape[0], rawshape[1], 1)), glt)[...,0]
+            ort_rawdat[ort_rawdat == -9999] = np.nan
 
             # Use the manual plumes to come up with a new set of plume masks and labels
-            full_fid_mask = np.zeros(rawshape) # mask of where plumes are in fid
-            plume_labels = np.zeros(rawshape) # labels of individual plumes in fid
-            for newp in new_plumes_in_fid:
+            #for newp in new_plumes_in_fid:
+            for newp in plumes_in_fid:
                 feat = manual_annotations['features'][newp]
-                rawspace_coords = rawspace_coordinate_conversion(glt, feat['geometry']['coordinates'][0], trans)
-                manual_mask = rasterize(shapes=[Polygon(rawspace_coords)], out_shape=rawshape) # numpy binary mask for manual IDs
+                #rawspace_coords = rawspace_coordinate_conversion(glt, feat['geometry']['coordinates'][0], trans)
+                #manual_mask = rasterize(shapes=[Polygon(rawspace_coords)], out_shape=rawshape) # numpy binary mask for manual IDs
+                rawspace_coords = rawspace_coordinate_conversion(glt, feat['geometry']['coordinates'][0], trans, ortho=True)
+                manual_mask = rasterize(shapes=[Polygon(rawspace_coords)], out_shape=(glt.shape[0],glt.shape[1])) # numpy binary mask for manual IDs
 
-                # Do segmenation
-                if args.style == 'sam':
-                    local_sam_mask = sam_segmentation(predictor, rawspace_coords, manual_mask)
+                plumestyle = 'classic'
+                if 'Delineation Mode' in feat['properties'].keys():
+                    plumestyle = feat['properties']['Delineation Mode']
 
-                    full_fid_mask += local_sam_mask
-                    plume_labels[local_sam_mask == 1] = newp + np.max(plume_labels)
+                loc_fid_mask = None
+                if plumestyle == 'classic':
+                    #loc_fid_mask = plume_mask_threshold(rawdat.copy(), manual_mask, style=args.type)
+                    loc_fid_mask = plume_mask_threshold(ort_rawdat.copy(), manual_mask, style=args.type)
+                elif plumestyle == 'manual':    
+                    loc_fid_mask = manual_mask.astype(bool)
 
-                elif args.style == 'classic':
-                    # Don't worry about plume_labels yet, we'll do that down the line
-                    full_fid_mask += manual_mask
-            if args.style == 'classic':
-                full_fid_mask, plume_labels = plume_mask(rawdat, full_fid_mask, style=args.type)
-            
+                outmask_poly_file = os.path.join(args.out_dir, f'{fid}_{feat["properties"]["Plume ID"]}_polygon.json')
+                outmask_ort_file = os.path.join(args.out_dir, f'{fid}_{feat["properties"]["Plume ID"]}_mask_ort.tif')
+                write_output_file(glt_ds, loc_fid_mask, outmask_ort_file)
+                subprocess.call(f'rm {outmask_poly_file}',shell=True)
+                subprocess.call(f'gdal_polygonize.py {outmask_ort_file} {outmask_poly_file} -f GeoJSON -mask {outmask_ort_file} -8',shell=True)
 
-            # ortho
-            plume_labels = single_image_ortho(plume_labels.reshape((rawshape[0],rawshape[1],1)), glt)[...,0]
-            plume_labels[plume_labels == -9999] = 0
 
-            #outmask_ort_file = os.path.join(args.out_dir, f'{fid}_ort.tif')
-            outmask_poly_file = os.path.join(args.out_dir, f'{fid}_polygon.json')
-            outmask_ort_file = os.path.join(args.out_dir, f'{fid}_mask_ort.tif')
-            color_ort_file = os.path.join(args.out_dir, f'{fid}_color_ort.tif')
-            write_output_file(glt_ds, plume_labels, outmask_ort_file)
-            subprocess.call(f'rm {outmask_poly_file}',shell=True)
-            subprocess.call(f'gdal_polygonize.py {outmask_ort_file} {outmask_poly_file} -f GeoJSON -mask {outmask_ort_file}',shell=True)
+            # Now collect everything from the FID....new and old
+            full_fid_mask = np.zeros((glt.shape[0],glt.shape[1]),dtype=bool) # mask of where plumes are in fid
+            plume_labels = np.zeros((glt.shape[0],glt.shape[1]),dtype=int) # labels of individual plumes in fid
 
-            write_color_plume(rawdat, full_fid_mask, glt, glt_ds, color_ort_file, style=args.type)
-
-            raw_plume_polygons = json.load(open(outmask_poly_file))
+            outmask_poly_files = glob.glob(os.path.join(args.out_dir, f'{fid}_*_polygon.json'))
+            outmask_ort_files = [x.replace("_polygon.json","_mask_ort.tif") for x in outmask_poly_files]
             plume_polygons = {}
-            for poly_feat in raw_plume_polygons['features']:
+            for _fid_poly_file in range(len(outmask_poly_files)):
+                
+                plume_to_add = json.load(open(outmask_poly_files[_fid_poly_file]))['features']
+                if len(plume_to_add) > 1:
+                    logging.warn('ACK - multiple polygons from one Plume ID')
+                plume_to_add = plume_to_add[0]
 
-                manual_matches = roi_filter(this_fid_manual_annotations, Polygon(poly_feat['geometry']['coordinates'][0]))
-                if len(manual_matches['features']) > 1:
+                loc_fid_mask = np.squeeze(gdal.Open(outmask_ort_files[_fid_poly_file]).ReadAsArray()).astype(bool)
+                full_fid_mask[loc_fid_mask] = 1
+                plume_labels[loc_fid_mask] = _fid_poly_file+1
+
+                plume_id = os.path.basename(outmask_poly_files[_fid_poly_file])[20:].replace('_polygon.json','') 
+                match_idx = np.unique([x for x, matchfeat in enumerate(this_fid_manual_annotations['features']) if matchfeat['properties']['Plume ID'] == plume_id])
+                if len(match_idx) > 1:
                     logging.warn('ACK - We intersected against multiple plumes')
-                if len(manual_matches['features']) == 0:
+                    continue
+                if len(match_idx) == 0:
                     logging.warn('ACK - We couldnt find an intersection')
+                    continue
+                match_idx = match_idx[0]
 
-                print(manual_matches['features'][0]['properties'])
-                plume_polygons[str(poly_feat['properties']['DN'])] = {'geometry': poly_feat['geometry']}
-                for ppk,ppi in manual_matches['features'][0]['properties'].items():
-                    plume_polygons[ppk] = ppi
+                plume_polygons[str(_fid_poly_file + 1)] = this_fid_manual_annotations['features'][match_idx]['properties']
+                plume_polygons[str(_fid_poly_file + 1)]['geometry'] = plume_to_add['geometry']
+
+            color_ort_file = os.path.join(args.out_dir, f'{fid}_color_ort.tif')
+            write_color_plume(ort_rawdat, full_fid_mask, glt_ds, color_ort_file, style=args.type)
+
+            #plume_polygons = {}
+            #for poly_feat in raw_plume_polygons['features']:
+
+            #    manual_matches = roi_filter(this_fid_manual_annotations, Polygon(poly_feat['geometry']['coordinates'][0]))
+            #    if len(manual_matches['features']) > 1:
+            #        logging.warn('ACK - We intersected against multiple plumes')
+            #        continue
+            #    if len(manual_matches['features']) == 0:
+            #        logging.warn('ACK - We couldnt find an intersection')
+            #        continue
+
+
+            #    logging.info(f'New plumes: {manual_matches["features"][0]["properties"]}')
+            #    plume_polygons[str(poly_feat['properties']['DN'])] = {'geometry': poly_feat['geometry']}
+            #    for ppk,ppi in manual_matches['features'][0]['properties'].items():
+            #        plume_polygons[str(poly_feat['properties']['DN'])][ppk] = ppi
 
 
             l1b_link = get_radiance_link(fid)
@@ -315,11 +394,8 @@ def main(input_args=None):
             ysize_m = transform_3857[5]
             del proj_ds
 
-            rawdat = single_image_ortho(rawdat.reshape((rawshape[0], rawshape[1], 1)), glt)[...,0]
-            rawdat[rawdat == -9999] = np.nan
-
             un_labels = np.unique(plume_labels)[1:]
-            background = np.round(np.nanstd(rawdat[plume_labels == 0]))
+            background = np.round(np.nanstd(ort_rawdat[plume_labels == 0]))
             start_datetime = datetime.datetime.strptime(fid[4:], "%Y%m%dt%H%M%S")
             end_datetime = start_datetime + datetime.timedelta(seconds=1)
 
@@ -329,18 +405,18 @@ def main(input_args=None):
 
             for lab in un_labels:
                 
-                maxval = np.nanmax(rawdat[plume_labels == lab])
-                if np.sum(plume_labels == lab) < 5 or maxval < 200:
+                maxval = np.nanmax(ort_rawdat[plume_labels == lab])
+                if np.sum(plume_labels == lab) < 5 or maxval < 200 or np.isnan(maxval):
                     continue
 
-                rawloc = np.where(np.logical_and(rawdat == maxval, plume_labels == lab))
+                rawloc = np.where(np.logical_and(ort_rawdat == maxval, plume_labels == lab))
                 maxval = np.round(maxval)
 
                 #sum and convert to kg.  conversion:
                 # ppm m / 1e6 ppm * x_pixel_size(m)*y_pixel_size(m) 1e3 L / m^3 * 1 mole / 22.4 L * 0.01604 kg / mole
                 ime_scaler = (1.0/1e6)* ((np.abs(xsize_m*ysize_m))/1.0) * (1000.0/1.0) * (1.0/22.4)*(0.01604/1.0)
 
-                ime_ss = rawdat[plume_labels == lab].copy()
+                ime_ss = ort_rawdat[plume_labels == lab].copy()
                 ime = np.nansum(ime_ss) * ime_scaler
                 ime_p = np.nansum(ime_ss[ime_ss > 0]) * ime_scaler
 
@@ -373,11 +449,11 @@ def main(input_args=None):
                     
                     # For R2 Review
                     if loc_pp['R1 - Reviewed'] and loc_pp['R1 - VISIONS'] and not loc_pp['R2 - Reviewed']:
-                        props['style'] = {"maxZoom": 20, "minZoom": 0, "color": "purple", 'opacity': 1, 'weight': 2, 'fillOpacity': 0}
+                        props['style'] = {"maxZoom": 20, "minZoom": 0, "color": "green", 'opacity': 1, 'weight': 2, 'fillOpacity': 0}
 
                     # Accept
                     if loc_pp['R1 - Reviewed'] and loc_pp['R1 - VISIONS'] and loc_pp['R2 - Reviewed'] and loc_pp['R2 - VISIONS']:
-                        props['style'] = {"maxZoom": 20, "minZoom": 0, "color": "green", 'opacity': 1, 'weight': 2, 'fillOpacity': 0}
+                        props['style'] = {"maxZoom": 20, "minZoom": 0, "color": "white", 'opacity': 1, 'weight': 2, 'fillOpacity': 0}
                     
                     # Reject
                     if (loc_pp['R1 - Reviewed'] and not loc_pp['R1 - VISIONS']) or (loc_pp['R2 - Reviewed'] and not loc_pp['R2 - VISIONS']):
@@ -417,15 +493,17 @@ def main(input_args=None):
 
             # Tile and Sync
             date=fid[4:]
-            time=fid.split('t')[-1].split('_')[0]
+            ftime=fid.split('t')[-1].split('_')[0]
             tile_dir = os.path.join(args.out_dir, 'tiled_' + args.type)
             if os.path.isdir(tile_dir) is False:
                 os.mkdir(tile_dir)
-            od_date = f'{date[:4]}-{date[4:6]}-{date[6:8]}T{time[:2]}_{time[2:4]}_{time[4:]}Z-to-{date[:4]}-{date[4:6]}-{date[6:8]}T{time[:2]}_{time[2:4]}_{str(int(time[4:6])+1):02}Z'
+            od_date = f'{date[:4]}-{date[4:6]}-{date[6:8]}T{ftime[:2]}_{ftime[2:4]}_{ftime[4:]}Z-to-{date[:4]}-{date[4:6]}-{date[6:8]}T{ftime[:2]}_{ftime[2:4]}_{str(int(ftime[4:6])+1):02}Z'
 
+            if os.path.isdir(f'{tile_dir}/{od_date}'):
+                subprocess.call(f'rm -r {tile_dir}/{od_date}',shell=True)
             cmd_str = f'gdal2tiles.py -z 2-12 --srcnodata 0 --processes=40 -r antialias {color_ort_file} {tile_dir}/{od_date} -x'
             subprocess.call(cmd_str, shell=True)
-            subprocess.call(f'rsync -a --info=progress2 {tile_dir}/{od_date}/ brodrick@$EMIT_SCIENCE_IP:/data/emit/mmgis/mosaics/{args.type}_plume_tiles/{od_date}/',shell=True)
+            subprocess.call(f'rsync -a --info=progress2 {tile_dir}/{od_date}/ brodrick@$EMIT_SCIENCE_IP:/data/emit/mmgis/mosaics/{args.type}_plume_tiles_working/{od_date}/ --delete',shell=True)
 
             subprocess.call(f'cp {previous_annotation_file} {os.path.splitext(previous_annotation_file)[0] + "_oneback.json"}',shell=True)
             subprocess.call(f'cp {annotation_file} {previous_annotation_file}',shell=True)

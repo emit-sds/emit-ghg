@@ -108,7 +108,7 @@ def main(input_args=None):
     outmeta = img.metadata
     outmeta['lines'] = nrows
     outmeta['data type'] = np2envitype(np.float64)
-    outmeta['bands'] = args.n_mc
+    outmeta['bands'] = 1
     outmeta['description'] = 'matched filter results'
     outmeta['band names'] = 'mf'
     
@@ -130,6 +130,7 @@ def main(input_args=None):
     outdict = locals()
     outdict.update(globals())
     outmeta['model parameters'] = '{ %s }'%(modelparms.format(**outdict))
+    outmeta['z plot range'] = '{0, 1500}'
 
     # Create output image
     outimg = envi.create_image(baseoutfilehdr,outmeta,force=True,ext='')
@@ -315,12 +316,30 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, abscf, args):
     if nuse < 10:
         return None, None
     
+    do_pca_rdn = True
     np.random.seed(13)
+    splits = np.linspace(0,float(args.n_mc)-0.001,len(use)).astype(int)
     for _mc in range(args.n_mc):
         
-        perm = np.random.permutation(len(use))
-        subset_size = int(args.mc_bag_fraction*len(use))
-        cov_subset = use[perm[:subset_size]]
+        #perm = np.random.permutation(len(use))
+        #subset_size = int(args.mc_bag_fraction*len(use))
+        #cov_subset = use[perm[:subset_size]]
+        subset_size = np.sum(splits != _mc)
+        cov_subset = use[splits != _mc]
+
+    
+        loc_rdn = None
+        if do_pca_rdn:
+            pca_mean = rdn[cov_subset,:].mean(axis=0) 
+            pcavals, pcavec = scipy.linalg.eigh(cov(rdn - pca_mean))
+            #pcavals[:5] = 0
+            #loc_rdn = (rdn - pca_mean ) @ pcavec
+            loc_rdn = (rdn - pca_mean ) @ pcavec[:,5:]
+            target = (abscf.copy() * pca_mean) @ pcavec[:,5:]
+        else:
+            loc_rdn = rdn
+            target = abscf.copy() * np.mean(loc_rdn[cov_subset,:],axis=0)
+
         
         
         if modelname == 'empirical':
@@ -330,7 +349,7 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, abscf, args):
             modelfit = lambda I_zm: looshrinkage(I_zm,alphas,nll,subset_size,I_reg=[])
                         
         try:                            
-            Icol_model = modelfit(rdn[cov_subset,:] - np.mean(rdn[cov_subset,:],axis=0))
+            Icol_model = modelfit(loc_rdn[cov_subset,:] - np.mean(loc_rdn[cov_subset,:],axis=0))
             if modelname=='looshrinkage':
                 C, alphaidx = Icol_model
                 Cinv = inv(C)
@@ -346,15 +365,14 @@ def mf_one_column(col, img_mm, bgminsamp, outimg_mm_shape, abscf, args):
 
         #logging.debug(f'{col}, {_mc}: {C[0,:5]}')
         # Classical matched filter
-        target = abscf.copy() * np.mean(rdn[cov_subset,:],axis=0)
         normalizer = target.dot(Cinv).dot(target.T)
-        mf = ((rdn[use,:] - np.mean(rdn[cov_subset,:], axis=0)).dot(Cinv).dot(target.T)) / normalizer
+        mf = ((loc_rdn[use,:] - np.mean(loc_rdn[cov_subset,:], axis=0)).dot(Cinv).dot(target.T)) / normalizer
         #logging.debug(f'{col}, {_mc}: {mf[:5]}')
         
         mf_mc[use,_mc] = mf * ppmscaling
     
-    #outimg_mm[use,0,-1] = np.mean(mf_mc[use,:], axis=1)
-    outimg_mm[use,0,:] = mf_mc[use,:]                  
+    outimg_mm[use,0,-1] = np.min(mf_mc[use,:], axis=1)
+    #outimg_mm[use,0,:] = mf_mc[use,:]                  
 
     colmu = np.mean(outimg_mm[use,0,:],axis=0)
     logging.debug(f'Column {col} mean: {colmu}')

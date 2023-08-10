@@ -88,9 +88,9 @@ def main(input_args=None):
         time=lfid.split('t')[-1]
         od_date = f'{date[:4]}-{date[4:6]}-{date[6:8]}T{time[:2]}_{time[2:4]}_{time[4:]}Z-to-{date[:4]}-{date[4:6]}-{date[6:8]}T{time[:2]}_{time[2:4]}_{str(int(time[4:6])+1):02}Z'
 
-        cmd_str = f'sbatch -N 1 -c 40 -p debug,emit --mem=180G --wrap="python masked_plume_delineator.py {" ".join(runargs)} && gdal2tiles.py -z 2-12 --srcnodata 0 --processes=40 -r antialias {output_file} {tile_dir}/{od_date} -x"'
+        cmd_str = f'sbatch -N 1 -c 40 -p standard --mem=180G --wrap="python masked_plume_delineator.py {" ".join(runargs)} && gdal2tiles.py -z 2-12 --srcnodata 0 --processes=40 -r antialias {output_file} {tile_dir}/{od_date} -x"'
         #cmd_str = f'sbatch -N 1 -c 2 --mem=30G -p standard,debug --wrap="python masked_plume_delineator.py {" ".join(runargs)}"'
-        subprocess.call(cmd_str, shell=True)
+        #subprocess.call(cmd_str, shell=True)
         print(cmd_str)
 
 
