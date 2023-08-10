@@ -18,7 +18,8 @@ from emit_main.workflow.workflow_manager import WorkflowManager
 
 def initialize_ummg(granule_name: str, creation_time: datetime, collection_name: str, collection_version: str,
                     start_time: datetime, stop_time: datetime, pge_name: str, pge_version: str,
-                    sds_software_build_version: str = None, ghg_software_build_version: str = None, doi: str = None,
+                    sds_software_build_version: str = None, ghg_software_build_version: str = None, 
+                    ghg_software_delivery_version: str = None, doi: str = None,
                     orbit: int = None, orbit_segment: int = None, scene: int = None, solar_zenith: float = None,
                     solar_azimuth: float = None, water_vapor: float = None, aod: float = None,
                     mean_fractional_cover: float = None, mean_spectral_abundance: float = None,
@@ -38,7 +39,7 @@ def initialize_ummg(granule_name: str, creation_time: datetime, collection_name:
         dictionary representation of ummg
     """
 
-    ummg = get_required_ummg()
+    ummg = {"ProviderDates": []}
     ummg['MetadataSpecification'] = {'URL': 'https://cdn.earthdata.nasa.gov/umm/granule/v1.6.3', 'Name': 'UMM-G',
                                      'Version': '1.6.3'}
 
@@ -220,6 +221,7 @@ def stage_files(wm, acq, files):
     cmd_make_target = ["ssh", wm.config["daac_server_internal"], "\"if", "[", "!", "-d",
                        f"'{acq.daac_staging_dir}'", "];", "then", "mkdir", f"{acq.daac_staging_dir};", "chgrp",
                        group, f"{acq.daac_staging_dir};", "fi\""]
+    print(f"cmd_make_target: {' '.join(cmd_make_target)}")
     output = subprocess.run(" ".join(cmd_make_target), shell=True, capture_output=True)
     if output.returncode != 0:
         raise RuntimeError(output.stderr.decode("utf-8"))
@@ -227,6 +229,7 @@ def stage_files(wm, acq, files):
     # files is a list of (source, target)
     for f in files:
         cmd_rsync = ["rsync", "-av", partial_dir_arg, f[0], target + f[1]]
+        print(f"rsync cmd: {' '.join(cmd_rsync)}")
         output = subprocess.run(" ".join(cmd_rsync), shell=True, capture_output=True)
         if output.returncode != 0:
             raise RuntimeError(output.stderr.decode("utf-8"))
@@ -253,7 +256,7 @@ def submit_cnm_notification(wm, acq, base_dir, granule_ur, files, formats, colle
     }
 
     for i, f in enumerate(files):
-        notification["files"].append(
+        notification["product"]["files"].append(
             {
                 "name": f[1],
                 "uri": acq.daac_uri_base + f[1],
@@ -265,26 +268,31 @@ def submit_cnm_notification(wm, acq, base_dir, granule_ur, files, formats, colle
         )
 
     # Write notification submission to file
+    print(f"Writing CNM notification file to {cnm_submission_path}")
     with open(cnm_submission_path, "w") as f:
         f.write(json.dumps(notification, indent=4))
     wm.change_group_ownership(cnm_submission_path)
 
     # Submit notification via AWS SQS
+    print(f"Submitting CNM notification via AWS SQS")
     cnm_submission_output = cnm_submission_path.replace(".json", ".out")
     cmd_aws = [wm.config["aws_cli_exe"], "sqs", "send-message", "--queue-url", queue_url, "--message-body",
                f"file://{cnm_submission_path}", "--profile", wm.config["aws_profile"], ">", cnm_submission_output]
+    print(f"cmd_aws: {' '.join(cmd_aws)}")
     output = subprocess.run(" ".join(cmd_aws), shell=True, capture_output=True)
     if output.returncode != 0:
         raise RuntimeError(output.stderr.decode("utf-8"))
 
 
 def deliver_ch4enh(base_dir, fname, wm, ghg_config):
+    print(f"Doing ch4enh delivery with fname {fname}")
+
     # Get scene details and create Granule UR
     # Example granule_ur: EMIT_L2B_CH4ENH_001_20230805T195459_2321713_001
-    acq = wm.acquistion
+    acq = wm.acquisition
     collection = "EMITL2BCH4ENH"
     prod_type = "CH4ENH"
-    granule_ur = f"EMIT_L2B_{prod_type}_{ghg_config['delivery_version']}_{acq.start_time.strftime('%Y%m%dT%H%M%S')}_{acq.orbit}_{acq.daac_scene}"
+    granule_ur = f"EMIT_L2B_{prod_type}_{ghg_config['collection_version']}_{acq.start_time.strftime('%Y%m%dT%H%M%S')}_{acq.orbit}_{acq.daac_scene}"
 
     # Create local/tmp daac names and paths
     local_enh_path = os.path.join(base_dir, fname)
@@ -293,10 +301,11 @@ def deliver_ch4enh(base_dir, fname, wm, ghg_config):
     daac_enh_name = f"{granule_ur}.tif"
     daac_browse_name = f"{granule_ur}.png"
     daac_ummg_name = f"{granule_ur}.cmr.json"
-    daac_ummg_path = os.path.join(base_dir, daac_ummg_name)
+    # daac_ummg_path = os.path.join(base_dir, daac_ummg_name)
     files = [(local_enh_path, daac_enh_name),
              (local_browse_path, daac_browse_name),
-             local_ummg_path, daac_ummg_name]
+             (local_ummg_path, daac_ummg_name)]
+    print(f"files: {files}")
 
     # Get the software_build_version (extended build num when product was created)
     hdr = envi.read_envi_header(acq.rdn_hdr_path)
@@ -306,22 +315,25 @@ def deliver_ch4enh(base_dir, fname, wm, ghg_config):
     ghg_software_build_version = ""
 
     # Create the UMM-G file
+    print(f"Creating ummg file at {local_ummg_path}")
     tif_creation_time = datetime.datetime.fromtimestamp(os.path.getmtime(local_enh_path), tz=datetime.timezone.utc)
     daynight = "Day" if acq.submode == "science" else "Night"
-    ummg = initialize_ummg(acq.abun_granule_ur, tif_creation_time, collection, ghg_config["collection_version"],
+    ummg = initialize_ummg(granule_ur, tif_creation_time, collection, ghg_config["collection_version"],
                            acq.start_time, acq.stop_time, ghg_config["repo_name"], ghg_config["repo_version"],
                            sds_software_build_version=sds_software_build_version,
                            ghg_software_build_version=ghg_software_build_version,
-                           doi=wm.config["dois"]["EMITL2BCH4ENH"], orbit=int(acq.orbit), orbit_segment=int(acq.scene),
+                           ghg_software_delivery_version=ghg_config["repo_version"],
+                           doi=ghg_config["dois"]["EMITL2BCH4ENH"], orbit=int(acq.orbit), orbit_segment=int(acq.scene),
                            scene=int(acq.daac_scene), solar_zenith=acq.mean_solar_zenith,
                            solar_azimuth=acq.mean_solar_azimuth, cloud_fraction=acq.cloud_fraction)
     ummg = add_data_files_ummg(ummg, files[:2], daynight, ["COG", "PNG"])
 
     ummg = add_boundary_ummg(ummg, acq.gring)
-    with open(daac_ummg_path, 'w', errors='ignore') as fout:
+    with open(local_ummg_path, 'w', errors='ignore') as fout:
         fout.write(json.dumps(ummg, indent=2, sort_keys=False, cls=SerialEncoder))
 
     # Copy files to staging server
+    print(f"Staging files to web server")
     stage_files(wm, acq, files)
 
     # Build and submit CNM notification
@@ -351,16 +363,20 @@ def main():
         }
     }
 
+    print(f"Using sds_config_path: {sds_config_path}")
+    print(f"Using ghg_config: {ghg_config}")
+
     # Determine which type of product we have
     base_dir = os.path.dirname(args.path)
     fname = os.path.basename(args.path)
     acq_id = fname.split("_")[0]
+    print(f"Getting workflow manager with acq_id {acq_id}")
     wm = WorkflowManager(config_path=sds_config_path, acquisition_id = acq_id)
 
     # TODO: Get filenames
-    if fname.endswith(""):
+    if fname.endswith(".tif"):
         deliver_ch4enh(base_dir, fname, wm, ghg_config)
-    elif fname.endswith(""):
+    elif fname.endswith(".xyz"):
         pass
         # deliver_ch4plm(base_dir, fname, wm, ghg_config)
 
