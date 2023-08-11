@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 #
-#  Copyright 2022 California Institute of Technology
+#  Copyright 2023 California Institute of Technology
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-# ISOFIT: Imaging Spectrometer Optimal FITting
 # Authors: Philip G Brodrick, philip.brodrick@jpl.nasa.gov
 
 import argparse
@@ -23,7 +22,6 @@ import subprocess
 import os
 from utils import envi_header
 from glob import glob
-import time
 
 
 
@@ -68,12 +66,8 @@ def main(input_args=None):
 
         print(cmd_str)
 
-        #subprocess.call(cmd_str,shell=True)
-        #print(os.environ.copy())
         env=os.environ.copy()
         subprocess.call(cmd_str,shell=True,env=env)
-        #print(cmd_str)
-        #time.sleep(0.1)
 
 
 if __name__ == '__main__':

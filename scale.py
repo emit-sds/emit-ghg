@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 #
-#  Copyright 2022 California Institute of Technology
+#  Copyright 2023 California Institute of Technology
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -14,16 +14,10 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-# ISOFIT: Imaging Spectrometer Optimal FITting
 # Authors: Philip G. Brodrick, philip.brodrick@jpl.nasa.gov
 
 import argparse
-from spectral.io import envi
-
-from os import makedirs
-from os.path import join as pathjoin, exists as pathexists
 import numpy as np
-from utils import envi_header
 from osgeo import gdal
 import matplotlib.pyplot as plt
 
