@@ -135,7 +135,7 @@ def main(input_args=None):
 
     logging.info('Create output file, initialized with nodata')
     outmeta = ds.metadata
-    outmeta['data type'] = np2envitype(np.float64)
+    outmeta['data type'] = np2envitype(np.float32)
     outmeta['bands'] = 1
     outmeta['description'] = 'Matched Filter Results'
     outmeta['band names'] = 'Matched Filter'
@@ -151,14 +151,14 @@ def main(input_args=None):
     write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.output_file, 0, output_shape)
 
     logging.info('Run jobs')
-    jobs = [mf_one_column.remote(col, rdn_id, absorption_coefficients_id, active_wl_idx, good_pixel_mask, args) for col in np.arange(output_shape[2])]
+    jobs = [mf_one_column.remote(col, rdn_id, absorption_coefficients_id, active_wl_idx, good_pixel_mask, args) for col in range(output_shape[2])]
     rreturn = [ray.get(jid) for jid in jobs]
 
     logging.info('Collecting and writing output')
-    output_dat = np.zeros(output_shape,dtype=np.float64)
+    output_dat = np.zeros(output_shape,dtype=np.float32)
     for ret in rreturn:
         if ret[0] is not None:
-            output_dat[:, :, ret[1]] = ret[0][:,0,:]
+            output_dat[:, 0, ret[1]] = ret[0][:,0]
     
     if args.mask_clouds_water and args.l2a_mask_file is not None:
         logging.info('Masking clouds and water')
@@ -374,7 +374,7 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
     output[np.logical_not(no_radiance_mask),:] = args.nodata_value
 
     logging.debug(f'Column {col} mean: {np.mean(output[good_pixel_idx,0])}')
-    return output, col
+    return output.astype(np.float32), col
 
 
 if __name__ == '__main__':
