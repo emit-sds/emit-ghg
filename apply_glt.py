@@ -21,27 +21,7 @@ import numpy as np
 from osgeo import gdal
 from spectral.io import envi
 
-from emit_utils.file_checks import envi_header
-
-def _write_bil_chunk(dat, outfile, line, shape, dtype = 'float32'):
-    """
-    Write a chunk of data to a binary, BIL formatted data cube.
-    Args:
-        dat: data to write
-        outfile: output file to write to
-        line: line of the output file to write to
-        shape: shape of the output file
-        dtype: output data type
-
-    Returns:
-        None
-    """
-    outfile = open(outfile, 'rb+')
-    outfile.seek(line * shape[1] * shape[2] * np.dtype(dtype).itemsize)
-    outfile.write(dat.astype(dtype).tobytes())
-    outfile.close()
-
-
+from emit_utils.file_checks import envi_header, write_bil_chunk
 
 def single_image_ortho(img_dat, in_glt, glt_nodata_value=0):
     """Orthorectify a single image
@@ -98,7 +78,7 @@ def main(input_args=None):
             outDataset.GetRasterBand(_b).SetDescription(band_names[_b-1])
     del outDataset
 
-    _write_bil_chunk(ort_img.transpose((0,2,1)), args.out_file, 0, (glt.shape[0], ort_img.shape[-1], glt.shape[1]))
+    write_bil_chunk(ort_img.transpose((0,2,1)), args.out_file, 0, (glt.shape[0], ort_img.shape[-1], glt.shape[1]))
 
 
 

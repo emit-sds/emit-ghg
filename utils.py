@@ -17,6 +17,7 @@
 # Authors: Philip G. Brodrick, philip.brodrick@jpl.nasa.gov
 
 import os
+import numpy as np
 
 def envi_header(inputpath):
     """
@@ -42,4 +43,20 @@ def envi_header(inputpath):
         return inputpath + '.hdr'
 
 
+def write_bil_chunk(dat, outfile, line, shape, dtype = 'float32'):
+    """
+    Write a chunk of data to a binary, BIL formatted data cube.
+    Args:
+        dat: data to write
+        outfile: output file to write to
+        line: line of the output file to write to
+        shape: shape of the output file
+        dtype: output data type
 
+    Returns:
+        None
+    """
+    outfile = open(outfile, 'rb+')
+    outfile.seek(line * shape[1] * shape[2] * np.dtype(dtype).itemsize)
+    outfile.write(dat.astype(dtype).tobytes())
+    outfile.close()
