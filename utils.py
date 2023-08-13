@@ -18,6 +18,7 @@
 
 import os
 import numpy as np
+import json
 
 def envi_header(inputpath):
     """
@@ -60,3 +61,17 @@ def write_bil_chunk(dat, outfile, line, shape, dtype = 'float32'):
     outfile.seek(line * shape[1] * shape[2] * np.dtype(dtype).itemsize)
     outfile.write(dat.astype(dtype).tobytes())
     outfile.close()
+
+
+class SerialEncoder(json.JSONEncoder):
+    """Encoder for json to help ensure json objects can be passed to the workflow manager.
+    """
+
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        else:
+            return super(SerialEncoder, self).default(obj)
+
