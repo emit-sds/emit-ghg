@@ -123,8 +123,9 @@ def main(input_args=None):
     logging.debug("adding flare mask")
     dilated_flare_mask, flare_mask = calculate_flare_mask(radiance, good_pixel_mask, wavelengths)
     good_pixel_mask[dilated_flare_mask] = False
-    write_hotspot_vector(args.flare_outfile, flare_mask, saturation)
-    exit()
+
+    if args.flare_outfile is not None:
+        write_hotspot_vector(args.flare_outfile, flare_mask, saturation)
 
     logging.debug("adding cloud / water mask")
     clouds_and_surface_water_mask = None
