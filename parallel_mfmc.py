@@ -125,6 +125,7 @@ def main(input_args=None):
     good_pixel_mask[dilated_flare_mask] = False
 
     if args.flare_outfile is not None:
+        logging.info(f'writing flare locations to {args.flare_outfile}')
         write_hotspot_vector(args.flare_outfile, flare_mask, saturation)
 
     logging.debug("adding cloud / water mask")
