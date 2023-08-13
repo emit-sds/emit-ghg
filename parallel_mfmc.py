@@ -28,6 +28,8 @@ import scipy
 import scipy.ndimage
 import numpy as np
 from utils import envi_header, write_bil_chunk
+import json
+from utils import SerialEncoder
 
 import logging
 import os
@@ -58,9 +60,12 @@ def main(input_args=None):
     parser.add_argument('--l1b_bandmask_file',type=str,default=None, help='path to the l1b bandmask file for saturation')         
     parser.add_argument('--l2a_mask_file', type=str,  help='path to l2a mask image for clouds and water')   
     parser.add_argument('--mask_clouds_water',action='store_true', help='mask clouds and water from output matched filter')         
+    parser.add_argument('--mask_saturation',action='store_true', help='mask saturated pixels from output matched filter')         
     parser.add_argument('--ppm_scaling', type=float, default=100000.0, help='scaling factor to unit convert outputs - based on target')         
     parser.add_argument('--ace_filter', action='store_true', help='Use the Adaptive Cosine Estimator (ACE) Filter')    
+    parser.add_argument('--target_scaling', type=str,choices=['mean','pixel'],default='mean', help='value to scale absorption coefficients by')    
     parser.add_argument('--nodata_value', type=float, default=-9999, help='output nodata value')         
+    parser.add_argument('--flare_outfile', type=str, default=None, help='output geojson to write flare location centers')         
     parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')         
     args = parser.parse_args(input_args)
@@ -109,12 +114,17 @@ def main(input_args=None):
 
     logging.info("load masks")
     good_pixel_mask = np.ones((radiance.shape[0],radiance.shape[2]),dtype=bool)
+    saturation = None
     if args.l1b_bandmask_file is not None:
         logging.debug("loading pixel mask")
-        good_pixel_mask[saturation_mask(args.l1b_bandmask_file) == False] = False
+        dilated_saturation, saturation = calculate_saturation_mask(args.l1b_bandmask_file)
+        good_pixel_mask[dilated_saturation] = False
 
     logging.debug("adding flare mask")
-    good_pixel_mask[flare_mask(radiance, good_pixel_mask, wavelengths)] = False
+    dilated_flare_mask, flare_mask = calculate_flare_mask(radiance, good_pixel_mask, wavelengths)
+    good_pixel_mask[dilated_flare_mask] = False
+    write_hotspot_vector(args.flare_outfile, flare_mask, saturation)
+    exit()
 
     logging.debug("adding cloud / water mask")
     clouds_and_surface_water_mask = None
@@ -144,7 +154,7 @@ def main(input_args=None):
     outmeta['data ignore value'] = args.nodata_value
     for kwarg in ['smoothing factors','wavelength','wavelength units','fwhm']:
         outmeta.pop(kwarg,None)
-        
+
     output_ds = envi.create_image(envi_header(args.output_file),outmeta,force=True,ext='')
     del output_ds
     output_shape = (int(outmeta['lines']),int(outmeta['bands']),int(outmeta['samples']))
@@ -160,10 +170,16 @@ def main(input_args=None):
         if ret[0] is not None:
             output_dat[:, 0, ret[1]] = ret[0][:,0]
     
-    if args.mask_clouds_water and args.l2a_mask_file is not None:
+    if args.mask_clouds_water and clouds_and_surface_water_mask is not None:
         logging.info('Masking clouds and water')
         output_dat = output_dat.transpose((0,2,1))
         output_dat[clouds_and_surface_water_mask,:] = args.nodata_value
+        output_dat = output_dat.transpose((0,2,1))
+
+    if args.mask_saturation and saturation is not None:
+        logging.info('Masking saturation')
+        output_dat = output_dat.transpose((0,2,1))
+        output_dat[saturation,:] = args.nodata_value
         output_dat = output_dat.transpose((0,2,1))
 
     write_bil_chunk(output_dat, args.output_file, 0, output_shape)
@@ -178,6 +194,32 @@ def np2envitype(np_dtype):
 def cov(A,**kwargs):
     kwargs.setdefault('ddof',1)
     return np.cov(A.T,**kwargs)
+
+def write_hotspot_vector(output_file, flares, saturation):
+    # find center of hotspots from data
+    labels_f = scipy.ndimage.label(flares)[0]
+    un_labels_f = np.unique(labels_f)
+    outdict = {"crs": {"properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84"}, "type": "name"},
+               "features":[],
+               "name":"radiance_hotspots",
+               "type":"FeatureCollection"}
+    for lab in un_labels_f[1:]:
+        locs = np.where(labels_f == lab)
+        outdict['features'].append({"geometry":{"coordinates":[np.mean(locs[1]),np.mean(locs[0]),0.0],"type":"Point"},
+                                    "properties":{"hotspot_type":"flare"},
+                                    "type":"Feature"})
+
+    if saturation is not None:
+        labels_s = scipy.ndimage.label(saturation)[0]
+        un_labels_s = np.unique(labels_s)
+        for lab in un_labels_s[1:]:
+            locs = np.where(labels_s == lab)
+            outdict['features'].append({"geometry":{"coordinates":[np.mean(locs[1]),np.mean(locs[0]),0.0],"type":"Point"},
+                                        "properties":{"hotspot_type":"saturation"},
+                                        "type":"Feature"})
+
+    with open(output_file, 'w') as fout:
+        fout.write(json.dumps(outdict, cls=SerialEncoder)) 
 
 
 def fit_looshrinkage_alpha(data, alphas, I_reg=[]):
@@ -287,20 +329,20 @@ def get_mc_subset(mc_iteration: int, args, good_pixel_idx: np.array):
     return cov_subset
 
 
-def saturation_mask(bandmask_file: str, dilation_iterations=10):
+def calculate_saturation_mask(bandmask_file: str, dilation_iterations=10):
     l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[:,:,:]
     l1b_bandmask_unpacked = np.unpackbits(l1b_bandmask_loaded, axis= -1)
     l1b_bandmask_summed = np.sum(l1b_bandmask_unpacked, axis = -1)
     saturation_mask = l1b_bandmask_summed - np.min(l1b_bandmask_summed, axis = 0)
     dilated_saturation_mask = scipy.ndimage.binary_dilation(saturation_mask != 0, iterations = dilation_iterations) < 1
-    return dilated_saturation_mask
+    return np.logical_not(dilated_saturation_mask), saturation_mask != 0
 
 
-def flare_mask(radiance: np.array, preflagged_pixels: np.array, wavelengths: np.array):
+def calculate_flare_mask(radiance: np.array, preflagged_pixels: np.array, wavelengths: np.array):
     b270_idx = np.argmin(np.abs(wavelengths - 2389.486)) 
     hot_mask = np.where(np.logical_and(radiance[:,b270_idx,:] > 1.5, preflagged_pixels == True), 1., 0.)
     hot_mask_dilated = scipy.ndimage.uniform_filter(hot_mask, [5,5]) > 0.01
-    return np.where(hot_mask_dilated)
+    return hot_mask_dilated, hot_mask
 
 
 @ray.remote
