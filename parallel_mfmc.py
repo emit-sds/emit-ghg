@@ -103,7 +103,7 @@ def main(input_args=None):
         la = np.where(np.logical_and(wavelengths > args.wavelength_range[2*n], wavelengths <= args.wavelength_range[2*n+1]))[0]
         active_wl_idx.extend(la.tolist())
     always_exclude_idx = []
-    if 'emit' in args.radioance_file:
+    if 'emit' in args.radiance_file:
         always_exclude_idx = np.where(np.logical_and(wavelengths < 1321, wavelengths > 1275))[0].tolist()
     active_wl_idx = np.array([x for x in active_wl_idx if x not in always_exclude_idx])
 
