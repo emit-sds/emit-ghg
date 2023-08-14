@@ -34,7 +34,9 @@ def main(rawargs=None):
     parser.add_argument('--dynamic', action='store_true')
     args = parser.parse_args(rawargs)
 
-    files = np.genfromtxt(args.file_list,dtype=str)
+    files = open(args.file_list,'r').readlines()
+    files = [x.strip() for x in files]
+
 
     for _f, fi in enumerate(files):
         count = 0
