@@ -102,7 +102,11 @@ def main(input_args=None):
     for n in range(len(args.wavelength_range)//2):
         la = np.where(np.logical_and(wavelengths > args.wavelength_range[2*n], wavelengths <= args.wavelength_range[2*n+1]))[0]
         active_wl_idx.extend(la.tolist())
-    active_wl_idx = np.array(active_wl_idx)
+    always_exclude_idx = []
+    if 'emit' in args.radioance_file:
+        always_exclude_idx = np.where(np.logical_and(wavelengths < 1321, wavelengths > 1275))[0].tolist()
+    active_wl_idx = np.array([x for x in active_wl_idx if x not in always_exclude_idx])
+
     logging.info(f'Active wavelength range: {args.wavelength_range}: {len(active_wl_idx)} channels')
 
     logging.info("load target library")
@@ -156,6 +160,24 @@ def main(input_args=None):
     outmeta['data ignore value'] = args.nodata_value
     for kwarg in ['smoothing factors','wavelength','wavelength units','fwhm']:
         outmeta.pop(kwarg,None)
+
+
+    output_ds = envi.create_image(envi_header(args.output_file + '_sat'),outmeta,force=True,ext='')
+    del output_ds
+    output_shape = (int(outmeta['lines']),int(outmeta['bands']),int(outmeta['samples']))
+    write_bil_chunk(dilated_saturation.astype(np.float32), args.output_file + '_sat', 0, output_shape)
+    
+    output_ds = envi.create_image(envi_header(args.output_file + '_flare'),outmeta,force=True,ext='')
+    del output_ds
+    output_shape = (int(outmeta['lines']),int(outmeta['bands']),int(outmeta['samples']))
+    write_bil_chunk(dilated_flare_mask, args.output_file + '_flare', 0, output_shape)
+    #exit()
+
+
+
+
+
+
 
     output_ds = envi.create_image(envi_header(args.output_file),outmeta,force=True,ext='')
     del output_ds
