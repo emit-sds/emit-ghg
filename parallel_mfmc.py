@@ -161,24 +161,6 @@ def main(input_args=None):
     for kwarg in ['smoothing factors','wavelength','wavelength units','fwhm']:
         outmeta.pop(kwarg,None)
 
-
-    output_ds = envi.create_image(envi_header(args.output_file + '_sat'),outmeta,force=True,ext='')
-    del output_ds
-    output_shape = (int(outmeta['lines']),int(outmeta['bands']),int(outmeta['samples']))
-    write_bil_chunk(dilated_saturation.astype(np.float32), args.output_file + '_sat', 0, output_shape)
-    
-    output_ds = envi.create_image(envi_header(args.output_file + '_flare'),outmeta,force=True,ext='')
-    del output_ds
-    output_shape = (int(outmeta['lines']),int(outmeta['bands']),int(outmeta['samples']))
-    write_bil_chunk(dilated_flare_mask, args.output_file + '_flare', 0, output_shape)
-    #exit()
-
-
-
-
-
-
-
     output_ds = envi.create_image(envi_header(args.output_file),outmeta,force=True,ext='')
     del output_ds
     output_shape = (int(outmeta['lines']),int(outmeta['bands']),int(outmeta['samples']))
