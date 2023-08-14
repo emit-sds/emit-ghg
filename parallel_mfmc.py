@@ -175,13 +175,13 @@ def main(input_args=None):
     if args.mask_clouds_water and clouds_and_surface_water_mask is not None:
         logging.info('Masking clouds and water')
         output_dat = output_dat.transpose((0,2,1))
-        output_dat[clouds_and_surface_water_mask,:] = args.nodata_value
+        output_dat[clouds_and_surface_water_mask,:] = 0 # could be nodata, but setting to 0 keeps maps continuous
         output_dat = output_dat.transpose((0,2,1))
 
     if args.mask_saturation and saturation is not None:
         logging.info('Masking saturation')
         output_dat = output_dat.transpose((0,2,1))
-        output_dat[saturation,:] = args.nodata_value
+        output_dat[saturation,:] = 0 # could be nodata, but setting to 0 keeps maps continuous
         output_dat = output_dat.transpose((0,2,1))
 
     write_bil_chunk(output_dat, args.output_file, 0, output_shape)
