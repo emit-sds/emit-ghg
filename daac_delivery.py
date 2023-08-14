@@ -11,6 +11,7 @@ import json
 import os
 import subprocess
 
+import numpy as np
 import spectral.io.envi as envi
 
 from emit_main.workflow.workflow_manager import WorkflowManager
@@ -23,7 +24,7 @@ def initialize_ummg(granule_name: str, creation_time: datetime, collection_name:
                     orbit: int = None, orbit_segment: int = None, scene: int = None, solar_zenith: float = None,
                     solar_azimuth: float = None, water_vapor: float = None, aod: float = None,
                     mean_fractional_cover: float = None, mean_spectral_abundance: float = None,
-                    cloud_fraction: str = None):
+                    cloud_fraction: str = None, source_granule: str = None, plume_id: str = None):
     """ Initialize a UMMG metadata output file
     Args:
         granule_name: granule UR tag
@@ -46,12 +47,17 @@ def initialize_ummg(granule_name: str, creation_time: datetime, collection_name:
     ummg['Platforms'] = [{'ShortName': 'ISS', 'Instruments': [{'ShortName': 'EMIT Imaging Spectrometer'}]}]
     ummg['GranuleUR'] = granule_name
 
-    ummg['TemporalExtent'] = {
-        'RangeDateTime': {
-            'BeginningDateTime': start_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            'EndingDateTime': stop_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+    if "PLM" in collection_name:
+        ummg['TemporalExtent'] = {
+            'SingleDateTime': start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
         }
-    }
+    else:
+        ummg['TemporalExtent'] = {
+            'RangeDateTime': {
+                'BeginningDateTime': start_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                'EndingDateTime': stop_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            }
+        }
 
     # As of 8/16/22 we are expecting related urls to either be in the collection metadata or inserted by the DAAC
     # ummg['RelatedUrls'] = [{'URL': 'https://earth.jpl.nasa.gov/emit/', 'Type': 'PROJECT HOME PAGE', 'Description': 'Link to the EMIT Project Website.'}]
@@ -81,6 +87,10 @@ def initialize_ummg(granule_name: str, creation_time: datetime, collection_name:
     if doi is not None:
         ummg['AdditionalAttributes'].append({'Name': 'Identifier_product_doi_authority', 'Values': ["https://doi.org"]})
         ummg['AdditionalAttributes'].append({'Name': 'Identifier_product_doi', 'Values': [str(doi)]})
+    if source_granule is not None:
+        ummg['AdditionalAttributes'].append({'Name': 'SOURCE_GRANULE', 'Values': [str(source_granule)]})
+    if plume_id is not None:
+        ummg['AdditionalAttributes'].append({'Name': 'PLUME_ID', 'Values': [str(plume_id)]})
     if orbit is not None:
         ummg['AdditionalAttributes'].append({'Name': 'ORBIT', 'Values': [str(orbit)]})
     if orbit_segment is not None:
@@ -341,7 +351,70 @@ def deliver_ch4enh(base_dir, fname, wm, ghg_config):
                             ghg_config["collection_version"])
 
 
+def deliver_ch4plm(base_dir, fname, wm, ghg_config):
+    print(f"Doing ch4plm delivery with fname {fname}")
 
+    # Get scene details and create Granule UR
+    # Example granule_ur: EMIT_L2B_CH4PLM_001_20230805T195459_000109
+    acq = wm.acquisition
+    # TODO: Get plume id from filename
+    plume_id = "000109"
+    collection = "EMITL2BCH4PLM"
+    prod_type = "CH4PLM"
+    granule_ur = f"EMIT_L2B_{prod_type}_{ghg_config['collection_version']}_{acq.start_time.strftime('%Y%m%dT%H%M%S')}_{plume_id}"
+    # TODO: How to get source granule
+    source_granule = f"EMIT_L2B_CH4ENH_{ghg_config['collection_version']}_{acq.start_time.strftime('%Y%m%dT%H%M%S')}_{acq.orbit}_{acq.daac_scene}"
+
+    # Create local/tmp daac names and paths
+    local_plm_path = os.path.join(base_dir, fname)
+    local_geojson_path = local_plm_path.replace(".tif", ".json")
+    local_browse_path = local_plm_path.replace(".tif", ".png")
+    local_ummg_path = local_plm_path.replace(".tif", ".cmr.json")
+    daac_enh_name = f"{granule_ur}.tif"
+    daac_geojson_name = f"{granule_ur}.json"
+    daac_browse_name = f"{granule_ur}.png"
+    daac_ummg_name = f"{granule_ur}.cmr.json"
+    # daac_ummg_path = os.path.join(base_dir, daac_ummg_name)
+    files = [(local_plm_path, daac_enh_name),
+             (local_geojson_path, daac_geojson_name),
+             (local_browse_path, daac_browse_name),
+             (local_ummg_path, daac_ummg_name)]
+    print(f"files: {files}")
+
+    # Get the software_build_version (extended build num when product was created)
+    hdr = envi.read_envi_header(acq.rdn_hdr_path)
+    sds_software_build_version = hdr["emit software build version"]
+
+    # TODO: Get ghg_software_build_version
+    ghg_software_build_version = ""
+
+    # Create the UMM-G file
+    print(f"Creating ummg file at {local_ummg_path}")
+    tif_creation_time = datetime.datetime.fromtimestamp(os.path.getmtime(local_plm_path), tz=datetime.timezone.utc)
+    daynight = "Day" if acq.submode == "science" else "Night"
+    ummg = initialize_ummg(granule_ur, tif_creation_time, collection, ghg_config["collection_version"],
+                           acq.start_time, acq.stop_time, ghg_config["repo_name"], ghg_config["repo_version"],
+                           sds_software_build_version=sds_software_build_version,
+                           ghg_software_build_version=ghg_software_build_version,
+                           ghg_software_delivery_version=ghg_config["repo_version"],
+                           doi=ghg_config["dois"]["EMITL2BCH4PLM"], orbit=int(acq.orbit), orbit_segment=int(acq.scene),
+                           scene=int(acq.daac_scene), solar_zenith=acq.mean_solar_zenith,
+                           solar_azimuth=acq.mean_solar_azimuth, cloud_fraction=acq.cloud_fraction,
+                           source_granule=source_granule, plume_id=plume_id)
+    ummg = add_data_files_ummg(ummg, files[:3], daynight, ["COG", "GeoJSON", "PNG"])
+
+    # TODO: Get boundary from geojson
+    ummg = add_boundary_ummg(ummg, acq.gring)
+    with open(local_ummg_path, 'w', errors='ignore') as fout:
+        fout.write(json.dumps(ummg, indent=2, sort_keys=False, cls=SerialEncoder))
+
+    # Copy files to staging server
+    print(f"Staging files to web server")
+    stage_files(wm, acq, files)
+
+    # Build and submit CNM notification
+    submit_cnm_notification(wm, acq, base_dir, granule_ur, files, ["data", "metadata", "browse", "metadata"],
+                            collection, ghg_config["collection_version"])
 
 
 def main():
