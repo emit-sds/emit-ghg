@@ -61,6 +61,7 @@ def main(input_args=None):
     parser.add_argument('--l2a_mask_file', type=str,  help='path to l2a mask image for clouds and water')   
     parser.add_argument('--mask_clouds_water',action='store_true', help='mask clouds and water from output matched filter')         
     parser.add_argument('--mask_saturation',action='store_true', help='mask saturated pixels from output matched filter')         
+    parser.add_argument('--mask_flares',action='store_true', help='mask flared pixels from output matched filter')         
     parser.add_argument('--ppm_scaling', type=float, default=100000.0, help='scaling factor to unit convert outputs - based on target')         
     parser.add_argument('--ace_filter', action='store_true', help='Use the Adaptive Cosine Estimator (ACE) Filter')    
     parser.add_argument('--target_scaling', type=str,choices=['mean','pixel'],default='mean', help='value to scale absorption coefficients by')    
@@ -187,6 +188,14 @@ def main(input_args=None):
         output_dat = output_dat.transpose((0,2,1))
         output_dat[saturation,:] = 0 # could be nodata, but setting to 0 keeps maps continuous
         output_dat = output_dat.transpose((0,2,1))
+
+    if args.mask_flares and saturation is not None:
+        logging.info('Masking saturation')
+        output_dat = output_dat.transpose((0,2,1))
+        output_dat[dilated_saturation,:] = -1 # could be nodata, but setting to 0 keeps maps continuous
+        output_dat[dilated_flare_mask,:] = -1 # could be nodata, but setting to 0 keeps maps continuous
+        output_dat = output_dat.transpose((0,2,1))
+
 
     write_bil_chunk(output_dat, args.output_file, 0, output_shape)
     logging.info('Complete')
