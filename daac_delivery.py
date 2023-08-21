@@ -322,7 +322,7 @@ def deliver_ch4enh(base_dir, fname, wm, ghg_config):
     sds_software_build_version = hdr["emit software build version"]
 
     # TODO: Get ghg_software_build_version
-    ghg_software_build_version = ""
+    ghg_software_build_version = "TBD"
 
     # Create the UMM-G file
     print(f"Creating ummg file at {local_ummg_path}")
@@ -336,7 +336,7 @@ def deliver_ch4enh(base_dir, fname, wm, ghg_config):
                            doi=ghg_config["dois"]["EMITL2BCH4ENH"], orbit=int(acq.orbit), orbit_segment=int(acq.scene),
                            scene=int(acq.daac_scene), solar_zenith=acq.mean_solar_zenith,
                            solar_azimuth=acq.mean_solar_azimuth, cloud_fraction=acq.cloud_fraction)
-    ummg = add_data_files_ummg(ummg, files[:2], daynight, ["COG", "PNG"])
+    ummg = add_data_files_ummg(ummg, files[:2], daynight, ["TIFF", "PNG"])
 
     ummg = add_boundary_ummg(ummg, acq.gring)
     with open(local_ummg_path, 'w', errors='ignore') as fout:
@@ -386,7 +386,7 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
     sds_software_build_version = hdr["emit software build version"]
 
     # TODO: Get ghg_software_build_version
-    ghg_software_build_version = ""
+    ghg_software_build_version = "TBD"
 
     # Create the UMM-G file
     print(f"Creating ummg file at {local_ummg_path}")
@@ -401,7 +401,7 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
                            scene=int(acq.daac_scene), solar_zenith=acq.mean_solar_zenith,
                            solar_azimuth=acq.mean_solar_azimuth, cloud_fraction=acq.cloud_fraction,
                            source_granule=source_granule, plume_id=plume_id)
-    ummg = add_data_files_ummg(ummg, files[:3], daynight, ["COG", "GeoJSON", "PNG"])
+    ummg = add_data_files_ummg(ummg, files[:3], daynight, ["TIFF", "JSON", "PNG"])
 
     # TODO: Get boundary from geojson
     ummg = add_boundary_ummg(ummg, acq.gring)
@@ -413,7 +413,7 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
     stage_files(wm, acq, files)
 
     # Build and submit CNM notification
-    submit_cnm_notification(wm, acq, base_dir, granule_ur, files, ["data", "metadata", "browse", "metadata"],
+    submit_cnm_notification(wm, acq, base_dir, granule_ur, files, ["data", "data", "browse", "metadata"],
                             collection, ghg_config["collection_version"])
 
 
@@ -431,8 +431,8 @@ def main():
         "repo_name": "emit-ghg",
         "repo_version": "v0.0.0",
         "dois": {
-            "EMITL2BCH4ENH": "",
-            "EMITL2BCH4PLM": ""
+            "EMITL2BCH4ENH": "10.5067/EMIT/EMITL2BCH4ENH.001",
+            "EMITL2BCH4PLM": "10.5067/EMIT/EMITL2BCH4PLM.001"
         }
     }
 
@@ -447,11 +447,10 @@ def main():
     wm = WorkflowManager(config_path=sds_config_path, acquisition_id = acq_id)
 
     # TODO: Get filenames
-    if fname.endswith(".tif"):
+    if "mf" in fname:
         deliver_ch4enh(base_dir, fname, wm, ghg_config)
-    elif fname.endswith(".xyz"):
-        pass
-        # deliver_ch4plm(base_dir, fname, wm, ghg_config)
+    elif "Plume" in fname:
+        deliver_ch4plm(base_dir, fname, wm, ghg_config)
 
 
 if __name__ == '__main__':
