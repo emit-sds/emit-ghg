@@ -402,10 +402,10 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
             acq_id = scene[:19]
         else:
             acq_id = scene.split("_")[4].replace("T", "t")
-        acq = WorkflowManager(wm.config_path, acquisition_id=acq_id).acquisition
-        total_solar_zenith += acq.mean_solar_zenith
-        total_solar_azimuth += acq.mean_solar_azimuth
-        total_cloud_fraction += acq.cloud_fraction
+        tmp_acq = WorkflowManager(wm.config_path, acquisition_id=acq_id).acquisition
+        total_solar_zenith += tmp_acq.mean_solar_zenith
+        total_solar_azimuth += tmp_acq.mean_solar_azimuth
+        total_cloud_fraction += tmp_acq.cloud_fraction
     mean_solar_zenith = total_solar_zenith / len(source_scenes)
     mean_solar_azimuth = total_solar_azimuth / len(source_scenes)
     mean_cloud_fraction = total_cloud_fraction / len(source_scenes)
