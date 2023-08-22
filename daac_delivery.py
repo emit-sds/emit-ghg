@@ -392,7 +392,7 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
     ghg_software_build_version = meta["software_build_version"]
 
     # Get source scenes
-    source_scenes = meta["source_scenes"]
+    source_scenes = meta["Source_Scenes"]
 
     # Create the UMM-G file
     print(f"Creating ummg file at {local_ummg_path}")
@@ -465,7 +465,7 @@ def main():
     # Determine which type of product we have
     base_dir = os.path.dirname(args.path)
     fname = os.path.basename(args.path)
-    acq_id = fname.split("_")[0]
+    acq_id = fname[:19]
     print(f"Getting workflow manager with acq_id {acq_id}")
     wm = WorkflowManager(config_path=sds_config_path, acquisition_id = acq_id)
 
