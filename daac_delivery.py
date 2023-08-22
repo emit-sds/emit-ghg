@@ -194,8 +194,9 @@ def add_boundary_ummg(ummg: dict, boundary_points: list):
     for point in boundary_points:
         formatted_points_list.append({'Longitude': point[0], 'Latitude': point[1]})
 
-    # For GPolygon, add the first point again to close out
-    formatted_points_list.append({'Longitude': boundary_points[0][0], 'Latitude': boundary_points[0][1]})
+    # For GPolygon, if the first and last points are not equal, add the first point again to close out
+    if boundary_points[0] != boundary_points[-1]:
+        formatted_points_list.append({'Longitude': boundary_points[0][0], 'Latitude': boundary_points[0][1]})
 
     hsd = {'HorizontalSpatialDomain':
               {"Geometry":
