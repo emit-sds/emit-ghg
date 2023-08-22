@@ -26,7 +26,7 @@ def initialize_ummg(granule_name: str, creation_time: datetime, collection_name:
                     orbit: int = None, orbit_segment: int = None, scene: int = None, solar_zenith: float = None,
                     solar_azimuth: float = None, water_vapor: float = None, aod: float = None,
                     mean_fractional_cover: float = None, mean_spectral_abundance: float = None,
-                    cloud_fraction: str = None, source_scenes: list = None, plume_id: str = None):
+                    cloud_fraction: str = None, source_scenes: list = None, plume_id: int = None):
     """ Initialize a UMMG metadata output file
     Args:
         granule_name: granule UR tag
@@ -392,7 +392,24 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
     ghg_software_build_version = meta["software_build_version"]
 
     # Get source scenes
-    source_scenes = meta["Source_Scenes"]
+    source_scenes = meta["Source_Scenes"].split(",")
+    # Calculate mean values for solar zenith, solar azimuth, and cloud fraction
+    total_solar_zenith = 0
+    total_solar_azimuth = 0
+    total_cloud_fraction = 0
+    for scene in source_scenes:
+        if scene.startswith("emit"):
+            acq_id = scene[:19]
+        else:
+            acq_id = scene.split("_")[4].replace("T", "t")
+        acq = WorkflowManager(wm.config_path, acquisition_id=acq_id).acquisition
+        total_solar_zenith += acq.mean_solar_zenith
+        total_solar_azimuth += acq.mean_solar_azimuth
+        total_cloud_fraction += acq.cloud_fraction
+    mean_solar_zenith = total_solar_zenith / len(source_scenes)
+    mean_solar_azimuth = total_solar_azimuth / len(source_scenes)
+    mean_cloud_fraction = total_cloud_fraction / len(source_scenes)
+
 
     # Create the UMM-G file
     print(f"Creating ummg file at {local_ummg_path}")
@@ -404,9 +421,8 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
                            ghg_software_build_version=ghg_software_build_version,
                            ghg_software_delivery_version=ghg_config["repo_version"],
                            doi=ghg_config["dois"]["EMITL2BCH4PLM"], orbit=int(acq.orbit), orbit_segment=int(acq.scene),
-                           scene=int(acq.daac_scene), solar_zenith=acq.mean_solar_zenith,
-                           solar_azimuth=acq.mean_solar_azimuth, cloud_fraction=acq.cloud_fraction,
-                           source_scenes=source_scenes, plume_id=plume_id)
+                           solar_zenith=mean_solar_zenith, solar_azimuth=mean_solar_azimuth,
+                           cloud_fraction=mean_cloud_fraction, source_scenes=source_scenes, plume_id=int(plume_id))
     ummg = add_data_files_ummg(ummg, files[:3], daynight, ["TIFF", "JSON", "PNG"])
 
     with open(local_geojson_path) as f:
@@ -415,7 +431,7 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
         found_coords = False
         for f in features:
             if "geometry" in f:
-                ummg = add_boundary_ummg(ummg, f["geometry"]["coordinates"])
+                ummg = add_boundary_ummg(ummg, f["geometry"]["coordinates"][0])
                 found_coords = True
         if not found_coords:
             raise RuntimeError(f"Couldn't find coordinates for {fname} in {local_geojson_path}")
@@ -467,7 +483,7 @@ def main():
     fname = os.path.basename(args.path)
     acq_id = fname[:19]
     print(f"Getting workflow manager with acq_id {acq_id}")
-    wm = WorkflowManager(config_path=sds_config_path, acquisition_id = acq_id)
+    wm = WorkflowManager(config_path=sds_config_path, acquisition_id=acq_id)
 
     if "enh" in fname:
         deliver_ch4enh(base_dir, fname, wm, ghg_config)
