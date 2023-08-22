@@ -14,17 +14,19 @@ import subprocess
 import numpy as np
 import spectral.io.envi as envi
 
+from osgeo import gdal
+
 from emit_main.workflow.workflow_manager import WorkflowManager
 
 
 def initialize_ummg(granule_name: str, creation_time: datetime, collection_name: str, collection_version: str,
                     start_time: datetime, stop_time: datetime, pge_name: str, pge_version: str,
-                    sds_software_build_version: str = None, ghg_software_build_version: str = None, 
+                    sds_software_build_version: str = None, ghg_software_build_version: str = None,
                     ghg_software_delivery_version: str = None, doi: str = None,
                     orbit: int = None, orbit_segment: int = None, scene: int = None, solar_zenith: float = None,
                     solar_azimuth: float = None, water_vapor: float = None, aod: float = None,
                     mean_fractional_cover: float = None, mean_spectral_abundance: float = None,
-                    cloud_fraction: str = None, source_granule: str = None, plume_id: str = None):
+                    cloud_fraction: str = None, source_scenes: list = None, plume_id: str = None):
     """ Initialize a UMMG metadata output file
     Args:
         granule_name: granule UR tag
@@ -87,8 +89,8 @@ def initialize_ummg(granule_name: str, creation_time: datetime, collection_name:
     if doi is not None:
         ummg['AdditionalAttributes'].append({'Name': 'Identifier_product_doi_authority', 'Values': ["https://doi.org"]})
         ummg['AdditionalAttributes'].append({'Name': 'Identifier_product_doi', 'Values': [str(doi)]})
-    if source_granule is not None:
-        ummg['AdditionalAttributes'].append({'Name': 'SOURCE_GRANULE', 'Values': [str(source_granule)]})
+    if source_scenes is not None:
+        ummg['AdditionalAttributes'].append({'Name': 'SOURCE_SCENES', 'Values': source_scenes})
     if plume_id is not None:
         ummg['AdditionalAttributes'].append({'Name': 'PLUME_ID', 'Values': [str(plume_id)]})
     if orbit is not None:
@@ -321,8 +323,10 @@ def deliver_ch4enh(base_dir, fname, wm, ghg_config):
     hdr = envi.read_envi_header(acq.rdn_hdr_path)
     sds_software_build_version = hdr["emit software build version"]
 
-    # TODO: Get ghg_software_build_version
-    ghg_software_build_version = "TBD"
+    # Get ghg_software_build_version
+    ds = gdal.Open(os.path.join(base_dir, fname))
+    meta = ds.GetMetadata()
+    ghg_software_build_version = meta["software_build_version"]
 
     # Create the UMM-G file
     print(f"Creating ummg file at {local_ummg_path}")
@@ -357,13 +361,10 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
     # Get scene details and create Granule UR
     # Example granule_ur: EMIT_L2B_CH4PLM_001_20230805T195459_000109
     acq = wm.acquisition
-    # TODO: Get plume id from filename
-    plume_id = "000109"
+    plume_id = str(int(fname.split(".")[0].split("-")[1])).zfill(6)
     collection = "EMITL2BCH4PLM"
     prod_type = "CH4PLM"
     granule_ur = f"EMIT_L2B_{prod_type}_{ghg_config['collection_version']}_{acq.start_time.strftime('%Y%m%dT%H%M%S')}_{plume_id}"
-    # TODO: How to get source granule
-    source_granule = f"EMIT_L2B_CH4ENH_{ghg_config['collection_version']}_{acq.start_time.strftime('%Y%m%dT%H%M%S')}_{acq.orbit}_{acq.daac_scene}"
 
     # Create local/tmp daac names and paths
     local_plm_path = os.path.join(base_dir, fname)
@@ -385,8 +386,13 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
     hdr = envi.read_envi_header(acq.rdn_hdr_path)
     sds_software_build_version = hdr["emit software build version"]
 
-    # TODO: Get ghg_software_build_version
-    ghg_software_build_version = "TBD"
+    # Get ghg_software_build_version
+    ds = gdal.Open(os.path.join(base_dir, fname))
+    meta = ds.GetMetadata()
+    ghg_software_build_version = meta["software_build_version"]
+
+    # Get source scenes
+    source_scenes = meta["source_scenes"]
 
     # Create the UMM-G file
     print(f"Creating ummg file at {local_ummg_path}")
@@ -400,11 +406,19 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
                            doi=ghg_config["dois"]["EMITL2BCH4PLM"], orbit=int(acq.orbit), orbit_segment=int(acq.scene),
                            scene=int(acq.daac_scene), solar_zenith=acq.mean_solar_zenith,
                            solar_azimuth=acq.mean_solar_azimuth, cloud_fraction=acq.cloud_fraction,
-                           source_granule=source_granule, plume_id=plume_id)
+                           source_scenes=source_scenes, plume_id=plume_id)
     ummg = add_data_files_ummg(ummg, files[:3], daynight, ["TIFF", "JSON", "PNG"])
 
-    # TODO: Get boundary from geojson
-    ummg = add_boundary_ummg(ummg, acq.gring)
+    with open(local_geojson_path) as f:
+        geojson =json.load(f)
+        features = geojson["features"]
+        found_coords = False
+        for f in features:
+            if "geometry" in f:
+                ummg = add_boundary_ummg(ummg, f["geometry"]["coordinates"])
+                found_coords = True
+        if not found_coords:
+            raise RuntimeError(f"Couldn't find coordinates for {fname} in {local_geojson_path}")
     with open(local_ummg_path, 'w', errors='ignore') as fout:
         fout.write(json.dumps(ummg, indent=2, sort_keys=False, cls=SerialEncoder))
 
@@ -422,14 +436,23 @@ def main():
     parser = argparse.ArgumentParser(description="Deliver GHG products to LP DAAC")
     parser.add_argument("path", help="The path to the product to be delivered.")
     parser.add_argument("--env", default="ops", help="The operating environment - dev, test, ops")
+    parser.add_argument("--collection_version", default="001", help="The DAAC collection version")
     args = parser.parse_args()
 
     # Get workflow manager and ghg config options
     sds_config_path = f"/store/emit/{args.env}/repos/emit-main/emit_main/config/{args.env}_sds_config.json"
+
+    # Get the current emit-ghg version
+    cmd = ["git", "symbolic-ref", "-q", "--short", "HEAD", "||", "git", "describe", "--tags", "--exact-match"]
+    output = subprocess.run(" ".join(cmd), shell=True, capture_output=True)
+    if output.returncode != 0:
+        raise RuntimeError(output.stderr.decode("utf-8"))
+    repo_version = output.stdout.decode("utf-8").replace("\n", "")
+
     ghg_config = {
-        "collection_version": "001",
+        "collection_version": args.collection_version,
         "repo_name": "emit-ghg",
-        "repo_version": "v0.0.0",
+        "repo_version": repo_version,
         "dois": {
             "EMITL2BCH4ENH": "10.5067/EMIT/EMITL2BCH4ENH.001",
             "EMITL2BCH4PLM": "10.5067/EMIT/EMITL2BCH4PLM.001"
@@ -446,8 +469,7 @@ def main():
     print(f"Getting workflow manager with acq_id {acq_id}")
     wm = WorkflowManager(config_path=sds_config_path, acquisition_id = acq_id)
 
-    # TODO: Get filenames
-    if "mf" in fname:
+    if "enh" in fname:
         deliver_ch4enh(base_dir, fname, wm, ghg_config)
     elif "Plume" in fname:
         deliver_ch4plm(base_dir, fname, wm, ghg_config)
