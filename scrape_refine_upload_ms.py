@@ -402,7 +402,7 @@ def main(input_args=None):
                 write_output_file(ort_ds, loc_fid_mask, outmask_ort_file)
                 subprocess.call(f'rm {outmask_poly_file}',shell=True)
                 subprocess.call(f'gdal_polygonize.py {outmask_ort_file} {outmask_finepoly_file} -f GeoJSON -mask {outmask_ort_file} -8',shell=True)
-                subprocess.call(f'ogr2ogr {outmask_poly_file} {outmask_finepoly_file} -f GeoJSON -simplify {trans[1]*2}',shell=True)
+                subprocess.call(f'ogr2ogr {outmask_poly_file} {outmask_finepoly_file} -f GeoJSON -lco RFC7946=YES -simplify {trans[1]*2}',shell=True)
                 dcid_mask_tif_files.append(outmask_ort_file)
                 dcid_mask_poly_files.append(outmask_poly_file)
 
