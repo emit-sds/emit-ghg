@@ -126,7 +126,7 @@ def add_fids(manual_annotations, coverage, manual_annotations_previous):
     coverage_df['properties.end_time'] = pd.to_datetime(coverage_df['properties.end_time'])
 
     for _feat, feat in enumerate(manual_annotations['features']):
-        logging.info(f'Adding new fid {_feat} / {len(manual_annotations["features"])}')
+        logging.debug(f'Adding new fid {_feat} / {len(manual_annotations["features"])}')
         # If this key isn't present, then the full feature wasn't really added yet
         if 'R1 - Reviewed' not in feat['properties'].keys():
             todel.append(_feat)
@@ -146,18 +146,21 @@ def add_fids(manual_annotations, coverage, manual_annotations_previous):
 
             if new_geom == prev_geom and rev_match:
                 manual_annotations_fid['features'][_feat] = manual_annotations_previous['features'][prev_idx]
-                logging.debug(f'Geometries and properties the same in {feat["properties"]}...skipping safely')
+                #logging.debug(f'Geometries and properties the same in {feat["properties"]}...skipping safely')
                 continue
 
         #subset_coverage = roi_filter(time_filter(coverage, feat['properties']['Time Range Start'] + 'Z', feat['properties']['Time Range End'] + 'Z'), Polygon(feat['geometry']['coordinates'][0]))
         subset_features = spatial_temporal_filter(coverage_df, coverage, Polygon(feat['geometry']['coordinates'][0]), feat['properties']['Time Range Start'] + 'Z', feat['properties']['Time Range End'] + 'Z') 
-        fids = [subset_features[x]['properties']['fid'].split('_')[0] for x in range(len(subset_features))]
-        manual_annotations_fid['features'][_feat]['properties']['fids'] = fids
-        updated_plumes.append(_feat)
+        if len(subset_features) == 0:
+            todel.append(_feat)
+        else:
+            fids = [subset_features[x]['properties']['fid'].split('_')[0] for x in range(len(subset_features))]
+            manual_annotations_fid['features'][_feat]['properties']['fids'] = fids
+            updated_plumes.append(_feat)
 
     for td in np.array(todel)[::-1]:
         msg = f'Deleting entry due to bad metadata - check input {manual_annotations_fid["features"][td]}'
-        logging.warn(msg)
+        logging.warning(msg)
         del manual_annotations_fid['features'][td]
 
     updated_plumes = np.array([x for x in updated_plumes if x not in todel])
@@ -400,7 +403,7 @@ def main(input_args=None):
                 outmask_poly_file = os.path.join(args.out_dir, f'{feat["properties"]["Plume ID"]}_polygon.json')
                 outmask_ort_file = os.path.join(args.out_dir, f'{feat["properties"]["Plume ID"]}_mask_ort.tif')
                 write_output_file(ort_ds, loc_fid_mask, outmask_ort_file)
-                subprocess.call(f'rm {outmask_poly_file}',shell=True)
+                subprocess.call(f'rm {outmask_poly_file}; rm {outmask_finepoly_file}',shell=True)
                 subprocess.call(f'gdal_polygonize.py {outmask_ort_file} {outmask_finepoly_file} -f GeoJSON -mask {outmask_ort_file} -8',shell=True)
                 subprocess.call(f'ogr2ogr {outmask_poly_file} {outmask_finepoly_file} -f GeoJSON -lco RFC7946=YES -simplify {trans[1]*2}',shell=True)
                 dcid_mask_tif_files.append(outmask_ort_file)
@@ -416,7 +419,7 @@ def main(input_args=None):
                 
                 plume_to_add = json.load(open(dcid_mask_poly_files[_dcid_poly_file]))['features']
                 if len(plume_to_add) > 1:
-                    logging.warn('ACK - multiple polygons from one Plume ID')
+                    logging.warning(f'ACK - multiple polygons from one Plume ID in file {dcid_mask_poly_files[_dcid_poly_file]}')
                 plume_to_add = plume_to_add[0]
 
                 loc_dcid_mask = np.squeeze(gdal.Open(dcid_mask_tif_files[_dcid_poly_file]).ReadAsArray()).astype(bool)
@@ -426,10 +429,10 @@ def main(input_args=None):
                 plume_id = os.path.basename(dcid_mask_poly_files[_dcid_poly_file]).replace('_polygon.json','') 
                 match_idx = np.unique([x for x, matchfeat in enumerate(this_dcid_manual_annotations['features']) if matchfeat['properties']['Plume ID'] == plume_id])
                 if len(match_idx) > 1:
-                    logging.warn('ACK - We intersected against multiple plumes')
+                    logging.warning('ACK - We intersected against multiple plumes')
                     continue
                 if len(match_idx) == 0:
-                    logging.warn('ACK - We couldnt find an intersection')
+                    logging.warning('ACK - We couldnt find an intersection')
                     continue
                 match_idx = match_idx[0]
 
@@ -550,7 +553,7 @@ def main(input_args=None):
                 # First add in polygon
                 existing_match_index = [_x for _x, x in enumerate(outdict['features']) if props['Plume ID'] == x['properties']['Plume ID'] and x['geometry']['type'] != 'Point']
                 if len(existing_match_index) > 2:
-                    logging.warn("HELP! Too many matching indices")
+                    logging.warning("HELP! Too many matching indices")
                 if len(existing_match_index) > 0:
                     outdict['features'][existing_match_index[0]] = loc_res
                 else:
@@ -559,7 +562,7 @@ def main(input_args=None):
                 # Now add in point
                 existing_match_index = [_x for _x, x in enumerate(outdict['features']) if props['Plume ID'] == x['properties']['Plume ID'] and x['geometry']['type'] == 'Point']
                 if len(existing_match_index) > 2:
-                    logging.warn("HELP! Too many matching indices")
+                    logging.warning("HELP! Too many matching indices")
                 if len(existing_match_index) > 0:
                     outdict['features'][existing_match_index[0]] = point_res
                 else:
@@ -582,12 +585,12 @@ def main(input_args=None):
                 subprocess.call(f'rm -r {tile_dir}/{od_date}',shell=True)
             cmd_str = f'gdal2tiles.py -z 2-12 --srcnodata 0 --processes=40 -r antialias {color_ort_file} {tile_dir}/{od_date} -x'
             subprocess.call(cmd_str, shell=True)
-            #subprocess.call(f'rsync -a --info=progress2 {tile_dir}/{od_date}/ brodrick@$EMIT_SCIENCE_IP:/data/emit/mmgis/mosaics/{args.type}_plume_tiles_working/{od_date}/ --delete',shell=True)
+            subprocess.call(f'rsync -a --info=progress2 {tile_dir}/{od_date}/ brodrick@$EMIT_SCIENCE_IP:/data/emit/mmgis/mosaics/{args.type}_plume_tiles_working/{od_date}/ --delete',shell=True)
 
             subprocess.call(f'cp {previous_annotation_file} {os.path.splitext(previous_annotation_file)[0] + "_oneback.json"}',shell=True)
             subprocess.call(f'cp {annotation_file} {previous_annotation_file}',shell=True)
-            #subprocess.call(f'rsync {output_json} brodrick@$EMIT_SCIENCE_IP:/data/emit/mmgis/coverage/converted_manual_{args.type}_plumes.json',shell=True)
-            subprocess.call(f'rsync {output_json} brodrick@$EMIT_SCIENCE_IP:/data/emit/mmgis/coverage/scenetest_plumes.json',shell=True)
+            subprocess.call(f'rsync {output_json} brodrick@$EMIT_SCIENCE_IP:/data/emit/mmgis/coverage/converted_manual_{args.type}_plumes.json',shell=True)
+            #subprocess.call(f'rsync {output_json} brodrick@$EMIT_SCIENCE_IP:/data/emit/mmgis/coverage/scenetest_plumes.json',shell=True)
 
  
 if __name__ == '__main__':

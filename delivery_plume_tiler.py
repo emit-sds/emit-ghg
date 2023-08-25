@@ -57,9 +57,6 @@ def single_plume_proc(all_plume_meta, index, output_base, dcid_sourcedir, source
         plume_dict['features'] = [deepcopy(all_plume_meta['features'][index])]
         plume_id = plume_dict['features'][0]['properties']['Plume ID']
 
-        plume_output_file = os.path.join(output_base + '.json')
-        with open(plume_output_file, 'w') as fout:
-            fout.write(json.dumps(plume_dict, cls=SerialEncoder)) 
 
         # rasterize that polygon
         ds = gdal.Open(os.path.join(dcid_sourcedir, f'dcid_{plume_dict["features"][0]["properties"]["DCID"]}_mf_ort.tif'))
@@ -87,13 +84,10 @@ def single_plume_proc(all_plume_meta, index, output_base, dcid_sourcedir, source
 
         metadata = {
             'Plume_Complex': plume_dict['features'][0]['properties']['Plume ID'],
-            'Orbit': plume_dict['features'][0]['properties']['Orbit'],
-            'dcid': plume_dict['features'][0]['properties']['DCID'],
             'Estimated_Uncertainty_ppmm': plume_dict['features'][0]['properties']['Concentration Uncertainty (ppm m)'],
             'UTC_Time_Observed': plume_dict['features'][0]['properties']['UTC Time Observed'],
             #Source_Scenes - match full conventions j
             'Source_Scenes': ','.join(scene_names),
-            'Units': 'ppm m',
             'Latitude of max concentration': plume_dict['features'][0]['properties']['Latitude of max concentration'],
             'Longitude of max concentration': plume_dict['features'][0]['properties']['Longitude of max concentration'],
             'Max Plume Concentration (ppm m)': plume_dict['features'][0]['properties']['Max Plume Concentration (ppm m)'],
@@ -101,6 +95,12 @@ def single_plume_proc(all_plume_meta, index, output_base, dcid_sourcedir, source
         metadata.update(extra_metadata)
         write_science_cog(dat, output_base + '.tif', outtrans, ds.GetProjection(), metadata)
         write_color_quicklook(dat, output_base + '.png')
+
+        plume_output_file = os.path.join(output_base + '.json')
+        # conger the DAAC Scene Numbers to full dac names, as above
+        plume_dict['features'][0]['properties']['DAAC Scene Numbers'] = scene_names
+        with open(plume_output_file, 'w') as fout:
+            fout.write(json.dumps(plume_dict, cls=SerialEncoder)) 
 
 
 def write_color_quicklook(indat, output_file):
@@ -183,6 +183,10 @@ def main(input_args=None):
         extra_metadata['publisher_email'] = "lpdaac@usgs.gov"
         extra_metadata['identifier_product_doi_authority'] = "https://doi.org"
         extra_metadata['title'] = "EMIT"
+
+        extra_metadata['Orbit']= feat['properties']['Orbit'],
+        extra_metadata['dcid']= feat['properties']['DCID'],
+        extra_metadata['Units']= 'ppm m',
 
         if feat['geometry']['type'] == 'Polygon':
             outdir=os.path.join(args.dest_dir, feat['properties']['Scene FIDs'][0][4:12], 'l2bch4plm')
