@@ -234,7 +234,7 @@ def stage_files(wm, acq, files):
     cmd_make_target = ["ssh", wm.config["daac_server_internal"], "\"if", "[", "!", "-d",
                        f"'{acq.daac_staging_dir}'", "];", "then", "mkdir", f"{acq.daac_staging_dir};", "chgrp",
                        group, f"{acq.daac_staging_dir};", "fi\""]
-    print(f"cmd_make_target: {' '.join(cmd_make_target)}")
+    # print(f"cmd_make_target: {' '.join(cmd_make_target)}")
     output = subprocess.run(" ".join(cmd_make_target), shell=True, capture_output=True)
     if output.returncode != 0:
         raise RuntimeError(output.stderr.decode("utf-8"))
@@ -242,7 +242,7 @@ def stage_files(wm, acq, files):
     # files is a list of (source, target)
     for f in files:
         cmd_rsync = ["rsync", "-av", partial_dir_arg, f[0], target + f[1]]
-        print(f"rsync cmd: {' '.join(cmd_rsync)}")
+        # print(f"rsync cmd: {' '.join(cmd_rsync)}")
         output = subprocess.run(" ".join(cmd_rsync), shell=True, capture_output=True)
         if output.returncode != 0:
             raise RuntimeError(output.stderr.decode("utf-8"))
@@ -291,7 +291,7 @@ def submit_cnm_notification(wm, acq, base_dir, granule_ur, files, formats, colle
     cnm_submission_output = cnm_submission_path.replace(".json", ".out")
     cmd_aws = [wm.config["aws_cli_exe"], "sqs", "send-message", "--queue-url", queue_url, "--message-body",
                f"file://{cnm_submission_path}", "--profile", wm.config["aws_profile"], ">", cnm_submission_output]
-    print(f"cmd_aws: {' '.join(cmd_aws)}")
+    # print(f"cmd_aws: {' '.join(cmd_aws)}")
     output = subprocess.run(" ".join(cmd_aws), shell=True, capture_output=True)
     if output.returncode != 0:
         raise RuntimeError(output.stderr.decode("utf-8"))
@@ -318,7 +318,7 @@ def deliver_ch4enh(base_dir, fname, wm, ghg_config):
     files = [(local_enh_path, daac_enh_name),
              (local_browse_path, daac_browse_name),
              (local_ummg_path, daac_ummg_name)]
-    print(f"files: {files}")
+    # print(f"files: {files}")
 
     # Get the software_build_version (extended build num when product was created)
     hdr = envi.read_envi_header(acq.rdn_hdr_path)
@@ -381,7 +381,7 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
              (local_geojson_path, daac_geojson_name),
              (local_browse_path, daac_browse_name),
              (local_ummg_path, daac_ummg_name)]
-    print(f"files: {files}")
+    # print(f"files: {files}")
 
     # Get the software_build_version (extended build num when product was created)
     hdr = envi.read_envi_header(acq.rdn_hdr_path)
