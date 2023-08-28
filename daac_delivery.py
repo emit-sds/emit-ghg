@@ -43,8 +43,8 @@ def initialize_ummg(granule_name: str, creation_time: datetime, collection_name:
     """
 
     ummg = {"ProviderDates": []}
-    ummg['MetadataSpecification'] = {'URL': 'https://cdn.earthdata.nasa.gov/umm/granule/v1.6.3', 'Name': 'UMM-G',
-                                     'Version': '1.6.3'}
+    ummg['MetadataSpecification'] = {'URL': 'https://cdn.earthdata.nasa.gov/umm/granule/v1.6.5', 'Name': 'UMM-G',
+                                     'Version': '1.6.5'}
 
     ummg['Platforms'] = [{'ShortName': 'ISS', 'Instruments': [{'ShortName': 'EMIT Imaging Spectrometer'}]}]
     ummg['GranuleUR'] = granule_name
@@ -373,7 +373,7 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
     local_browse_path = local_plm_path.replace(".tif", ".png")
     local_ummg_path = local_plm_path.replace(".tif", ".cmr.json")
     daac_enh_name = f"{granule_ur}.tif"
-    daac_geojson_name = f"{granule_ur}.json"
+    daac_geojson_name = f"{granule_ur.replace('CH4PLM', 'CH4PLMMETA')}.json"
     daac_browse_name = f"{granule_ur}.png"
     daac_ummg_name = f"{granule_ur}.cmr.json"
     # daac_ummg_path = os.path.join(base_dir, daac_ummg_name)
@@ -402,7 +402,7 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
         if scene.startswith("emit"):
             acq_id = scene[:19]
         else:
-            acq_id = scene.split("_")[4].replace("T", "t")
+            acq_id = f"emit{scene.split('_')[4].replace('T', 't')}"
         tmp_acq = WorkflowManager(wm.config_path, acquisition_id=acq_id).acquisition
         total_solar_zenith += tmp_acq.mean_solar_zenith
         total_solar_azimuth += tmp_acq.mean_solar_azimuth
