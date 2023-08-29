@@ -49,6 +49,31 @@ def write_science_cog(output_img, output_file, geotransform, projection, metadat
 
     subprocess.call(f'sh /home/brodrick/bin/cog.sh {tmp_file} {output_file}',shell=True)
     subprocess.call(f'rm {tmp_file}',shell=True)
+
+
+def tile_dcid(features, outdir, datadir):
+
+    dcid = features[0]["properties"]["DCID"]
+    ds = gdal.Open(os.path.join(datadir, f'dcid_{dcid}_mf_ort.tif'))
+    dat = ds.ReadAsArray().squeeze()
+
+    plume_mask = np.zeros(dat.shape,dtype=bool)
+    for feat in features:
+       outmask_ort_file = os.path.join(datadir, f'{feat["properties"]["Plume ID"]}_mask_ort.tif')
+       loc_dcid_mask = np.squeeze(gdal.Open(outmask_ort_file).ReadAsArray()).astype(bool)
+       plume_mask[loc_dcid_mask] = 1
+
+    color_ort_file = os.path.join(outdir, f'{dcid}_color_ort.tif')
+    write_color_plume(dat, plume_mask, ds, color_ort_file, style='ch4')
+
+    fids = np.unique([sublist for feat in features for sublist in feat['properties']['Scene FIDs']])
+    start_date=fids[0][4:]
+    start_ftime=fids[0].split('t')[-1].split('_')[0]
+    end_date=fids[-1][4:]
+    end_ftime=fids[-1].split('t')[-1].split('_')[0]
+    od_date = f'{start_date[:4]}-{start_date[4:6]}-{start_date[6:8]}T{start_ftime[:2]}_{start_ftime[2:4]}_{start_ftime[4:]}Z-to-{end_date[:4]}-{end_date[4:6]}-{end_date[6:8]}T{end_ftime[:2]}_{end_ftime[2:4]}_{str(int(end_ftime[4:6])+1):02}Z'
+    cmd_str = f'gdal2tiles.py -z 2-12 --srcnodata 0 --processes=40 -r antialias {color_ort_file} {outdir}/{od_date} -x'
+    subprocess.call(cmd_str,shell=True)
     
 
 def single_plume_proc(all_plume_meta, index, output_base, dcid_sourcedir, source_dir, extra_metadata):
@@ -62,7 +87,6 @@ def single_plume_proc(all_plume_meta, index, output_base, dcid_sourcedir, source
         ds = gdal.Open(os.path.join(dcid_sourcedir, f'dcid_{plume_dict["features"][0]["properties"]["DCID"]}_mf_ort.tif'))
         dat = ds.ReadAsArray().squeeze()
 
-        print(plume_dict['features'][0]['geometry']['coordinates'][0])
         rawspace_coords = rawspace_coordinate_conversion([], plume_dict['features'][0]['geometry']['coordinates'][0], ds.GetGeoTransform(), ortho=True)
         manual_mask = rasterize(shapes=[Polygon(rawspace_coords)], out_shape=(dat.shape[0],dat.shape[1])) # numpy binary mask for manual IDs
 
@@ -98,7 +122,7 @@ def single_plume_proc(all_plume_meta, index, output_base, dcid_sourcedir, source
 
         plume_output_file = os.path.join(output_base + '.json')
         # conger the DAAC Scene Numbers to full dac names, as above
-        plume_dict['features'][0]['properties']['DAAC Scene Numbers'] = scene_names
+        plume_dict['features'][0]['properties']['DAAC Scene Names'] = scene_names
         with open(plume_output_file, 'w') as fout:
             fout.write(json.dumps(plume_dict, cls=SerialEncoder)) 
 
@@ -145,70 +169,117 @@ def main(input_args=None):
     parser.add_argument('--manual_del_dir', type=str, default='/beegfs/scratch/brodrick/methane/ch4_plumedir_scenetest/')
     parser.add_argument('--software_version', type=str, default=None)
     parser.add_argument('--data_version', type=str, default=None)
+    parser.add_argument('--visions_delivery', type=int, choices=[0,1,2],default=0)
+    parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
+    parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')    
     args = parser.parse_args(input_args)
+
+    logging.basicConfig(format='%(levelname)s:%(asctime)s ||| %(message)s', level=args.loglevel,
+                        filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
 
     tile_dir = os.path.join(args.dest_dir, 'ch4_plume_tiles')
 
 
     all_plume_meta = json.load(open(f'{args.manual_del_dir}/combined_plume_metadata.json'))
     unique_fids = np.unique([sublist for feat in all_plume_meta['features'] for sublist in feat['properties']['Scene FIDs']])
+    dcids = np.array([feat['properties']['DCID'] for feat in all_plume_meta['features']])
+    unique_dcids = np.unique(dcids)
 
     plume_count = 1
 
-    for _feat, feat in enumerate(all_plume_meta['features']):
-        print(f'{_feat+1}/{len(all_plume_meta["features"])}')
+    if args.visions_delivery != 2:
+        for _feat, feat in enumerate(all_plume_meta['features']):
+            logging(f'Processing plume {_feat+1}/{len(all_plume_meta["features"])}')
 
-        extra_metadata = {}
-        if args.software_version:
-            extra_metadata['software_build_version'] = args.software_version
-        if args.data_version:
-            extra_metadata['product_version'] = args.data_version
-        extra_metadata['keywords'] = "Imaging Spectroscopy, minerals, EMIT, dust, radiative forcing"
-        extra_metadata['sensor'] = "EMIT (Earth Surface Mineral Dust Source Investigation)"
-        extra_metadata['instrument'] = "EMIT"
-        extra_metadata['platform'] = "ISS"
-        extra_metadata['Conventions'] = "CF-1.63"
-        extra_metadata['institution'] = "NASA Jet Propulsion Laboratory/California Institute of Technology"
-        extra_metadata['license'] = "https://science.nasa.gov/earth-science/earth-science-data/data-information-policy/"
-        extra_metadata['naming_authority'] = "LPDAAC"
-        extra_metadata['date_created'] = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-        extra_metadata['keywords_vocabulary'] = "NASA Global Change Master Directory (GCMD) Science Keywords"
-        extra_metadata['stdname_vocabulary'] = "NetCDF Climate and Forecast (CF) Metadata Convention"
-        extra_metadata['creator_name'] = "Jet Propulsion Laboratory/California Institute of Technology"
-        extra_metadata['creator_url'] = "https://earth.jpl.nasa.gov/emit/"
-        extra_metadata['project'] = "Earth Surface Mineral Dust Source Investigation"
-        extra_metadata['project_url'] = "https://earth.jpl.nasa.gov/emit/"
-        extra_metadata['publisher_name'] = "NASA LPDAAC"
-        extra_metadata['publisher_url'] = "https://lpdaac.usgs.gov"
-        extra_metadata['publisher_email'] = "lpdaac@usgs.gov"
-        extra_metadata['identifier_product_doi_authority'] = "https://doi.org"
-        extra_metadata['title'] = "EMIT"
+            extra_metadata = {}
+            if args.software_version:
+                extra_metadata['software_build_version'] = args.software_version
+            if args.data_version:
+                extra_metadata['product_version'] = args.data_version
+            extra_metadata['keywords'] = "Imaging Spectroscopy, minerals, EMIT, dust, radiative forcing"
+            extra_metadata['sensor'] = "EMIT (Earth Surface Mineral Dust Source Investigation)"
+            extra_metadata['instrument'] = "EMIT"
+            extra_metadata['platform'] = "ISS"
+            extra_metadata['Conventions'] = "CF-1.63"
+            extra_metadata['institution'] = "NASA Jet Propulsion Laboratory/California Institute of Technology"
+            extra_metadata['license'] = "https://science.nasa.gov/earth-science/earth-science-data/data-information-policy/"
+            extra_metadata['naming_authority'] = "LPDAAC"
+            extra_metadata['date_created'] = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+            extra_metadata['keywords_vocabulary'] = "NASA Global Change Master Directory (GCMD) Science Keywords"
+            extra_metadata['stdname_vocabulary'] = "NetCDF Climate and Forecast (CF) Metadata Convention"
+            extra_metadata['creator_name'] = "Jet Propulsion Laboratory/California Institute of Technology"
+            extra_metadata['creator_url'] = "https://earth.jpl.nasa.gov/emit/"
+            extra_metadata['project'] = "Earth Surface Mineral Dust Source Investigation"
+            extra_metadata['project_url'] = "https://earth.jpl.nasa.gov/emit/"
+            extra_metadata['publisher_name'] = "NASA LPDAAC"
+            extra_metadata['publisher_url'] = "https://lpdaac.usgs.gov"
+            extra_metadata['publisher_email'] = "lpdaac@usgs.gov"
+            extra_metadata['identifier_product_doi_authority'] = "https://doi.org"
+            extra_metadata['title'] = "EMIT"
 
-        extra_metadata['Orbit']= feat['properties']['Orbit'],
-        extra_metadata['dcid']= feat['properties']['DCID'],
-        extra_metadata['Units']= 'ppm m',
+            extra_metadata['Orbit']= feat['properties']['Orbit'],
+            extra_metadata['dcid']= feat['properties']['DCID'],
+            extra_metadata['Units']= 'ppm m',
 
-        if feat['geometry']['type'] == 'Polygon':
-            outdir=os.path.join(args.dest_dir, feat['properties']['Scene FIDs'][0][4:12], 'l2bch4plm')
+            if feat['geometry']['type'] == 'Polygon':
+                outdir=os.path.join(args.dest_dir, feat['properties']['Scene FIDs'][0][4:12], 'l2bch4plm')
+                if os.path.isdir(outdir) is False:
+                    subprocess.call(f'mkdir -p {outdir}',shell=True)
+                single_plume_proc(all_plume_meta, _feat, os.path.join(outdir, feat['properties']['Scene FIDs'][0] + '_' + feat['properties']['Plume ID']), args.manual_del_dir, args.source_dir, extra_metadata)
+
+
+
+        for fid in unique_fids:
+            outdir = os.path.join(args.dest_dir, fid[4:12], 'l2bch4enh')
             if os.path.isdir(outdir) is False:
                 subprocess.call(f'mkdir -p {outdir}',shell=True)
-            single_plume_proc(all_plume_meta, _feat, os.path.join(outdir, feat['properties']['Scene FIDs'][0] + '_' + feat['properties']['Plume ID']), args.manual_del_dir, args.source_dir, extra_metadata)
+            single_scene_proc(os.path.join(args.source_dir, fid[4:12], fid + '_ch4_mf_ort'),  os.path.join(outdir, fid + 'ch4_enh.tif'), extra_metadata)
 
 
+    if args.visions_delivery == 1 or args.visions_delivery == 2:
 
-    for fid in unique_fids:
-        outdir = os.path.join(args.dest_dir, fid[4:12], 'l2bch4enh')
+        visions_plume_idx = [x for x, feat  in enumerate(all_plume_meta['features']) if feat['properties']['style']['color'] == 'white' and feat['geometry']['type'] == 'Polygon']
+        visions_point_idx = [x for x, feat  in enumerate(all_plume_meta['features']) if feat['properties']['style']['color'] == 'white' and feat['geometry']['type'] == 'Point']
+
+
+        outdir = os.path.join(args.dest_dir, 'visions_ch4_tiles')
         if os.path.isdir(outdir) is False:
             subprocess.call(f'mkdir -p {outdir}',shell=True)
-        single_scene_proc(os.path.join(args.source_dir, fid[4:12], fid + '_ch4_mf_ort'),  os.path.join(outdir, fid + 'ch4_enh.tif'), extra_metadata)
 
-    # make PNGs for both
+        for _dcid, dcid in enumerate(unique_dcids):
+            logging.info(f'Tiling {_dcid + 1} / {len(unique_dcids)}')
+            match_idx = np.where(dcids == dcid)[0]
+            
+            subfeatures = [feat for _feat, feat in enumerate(all_plume_meta['features']) if _feat in match_idx and _feat in visions_plume_idx]
+            if len(subfeatures) > 0:
+                tile_dcid(subfeatures, outdir, args.manual_del_dir)
+
+
+        outdict = {"crs": {"properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84" }, "type": "name"},"features":[],"name":"methane_metadata","type":"FeatureCollection" }
+        for nmi in visions_plume_idx:
+            newfeat = all_plume_meta['features'][nmi].copy()
+            pc = newfeat['properties']['Plume ID']
+            if newfeat['geometry']['type'] == 'Polygon':
+                newfeat['properties']['plume_complex_count'] = plume_count
+                outdict['features'].append(newfeat)
+
+                for npi in visions_point_idx:
+                    pointfeat = all_plume_meta['features'][npi].copy()
+                    if pointfeat['properties']['Plume ID'] == newfeat['properties']['Plume ID']:
+                        pointfeat['properties']['plume_complex_count'] = plume_count
+                        pointfeat['properties']['style'] = {'color': 'red','fillOpacity':0,'maxZoom':9,'minZoom':0,'opacity':1,'radius':10,'weight':2}
+                        outdict['features'].append(pointfeat)
+                        break
+                plume_count += 1
 
 
 
+        with open(os.path.join(args.dest_dir, 'combined_plume_metadata.json'), 'w') as fout:
+            fout.write(json.dumps(outdict, cls=SerialEncoder)) 
 
+    
 
-
+    
 
 
 

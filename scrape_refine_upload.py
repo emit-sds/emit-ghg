@@ -124,14 +124,17 @@ def add_fids(manual_annotations, coverage, manual_annotations_previous):
                 continue
 
         subset_coverage = roi_filter(time_filter(coverage, feat['properties']['Time Range Start'], feat['properties']['Time Range End']), Polygon(feat['geometry']['coordinates'][0]))
-        fid = subset_coverage['features'][0]['properties']['fid'].split('_')[0]
-        manual_annotations_fid['features'][_feat]['properties']['fid'] = fid
-        updated_plumes.append(_feat)
+        if len(subset_coverage['features']) == 0:
+            todel.append(_feat)
+        else:
+            fid = subset_coverage['features'][0]['properties']['fid'].split('_')[0]
+            manual_annotations_fid['features'][_feat]['properties']['fid'] = fid
+            updated_plumes.append(_feat)
 
     for td in np.array(todel)[::-1]:
         msg = f'Deleting entry due to bad metadata - check input {manual_annotations_fid["features"][td]}'
         logging.warn(msg)
-        del manual_annotations_fid['features'][td]
+        manual_annotations_fid['features'].pop(td)
 
     updated_plumes = np.array([x for x in updated_plumes if x not in todel])
     for td in todel:

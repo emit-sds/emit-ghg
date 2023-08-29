@@ -133,6 +133,7 @@ def add_fids(manual_annotations, coverage, manual_annotations_previous):
             logging.info(f'R1 - Reviewed not in {feat["properties"]}')
             continue # This is insufficient
         plume_id = feat['properties']['Plume ID']
+
         if plume_id in previous_plume_ids:
             new_geom = feat['geometry']['coordinates']
             prev_idx = previous_plume_ids.index(plume_id)
@@ -191,11 +192,7 @@ def add_orbits(annotations, indices_to_update, database):
         if len(un_dcids) > 1:
             logging.error('Ack - entry {annotations["features"][ind]} spans two dcids')
 
-        try:
-            annotations['features'][ind]['properties']['orbit'] = un_orbits[0]
-        except:
-            import ipdb; ipdb.set_trace()
-            a = 1
+        annotations['features'][ind]['properties']['orbit'] = un_orbits[0]
         annotations['features'][ind]['properties']['dcid'] = un_dcids[0]
         annotations['features'][ind]['properties']['daac_scenes'] = scene_numbers
     
@@ -272,8 +269,6 @@ def sam_segmentation(predictor, rawspace_coords, manual_mask, n_input_points=20)
         input_labels.append(manual_mask[pt[1],pt[0]])
         input_points.append(pt)
         
-    print(input_points)
-    print(input_labels)
     masks, _, _ = predictor.predict(
                                     point_coords=np.array(input_points),
                                     point_labels=np.array(input_labels),
@@ -355,7 +350,6 @@ def main(input_args=None):
         with open(annotation_file, 'w') as fout:
             fout.write(json.dumps(manual_annotations, cls=SerialEncoder)) 
 
-        print([x for x in range(len(manual_annotations['features'])) if 'fids' not in manual_annotations['features'][x]['properties'].keys()])
         unique_fids = np.unique([sublist for x in new_plumes for sublist in manual_annotations['features'][x]['properties']['fids']])
         unique_orbits = np.unique([manual_annotations['features'][x]['properties']['orbit'] for x in new_plumes]).tolist()
         unique_dcids = np.unique([manual_annotations['features'][x]['properties']['dcid'] for x in new_plumes]).tolist()
@@ -405,7 +399,7 @@ def main(input_args=None):
                 write_output_file(ort_ds, loc_fid_mask, outmask_ort_file)
                 subprocess.call(f'rm {outmask_poly_file}; rm {outmask_finepoly_file}',shell=True)
                 subprocess.call(f'gdal_polygonize.py {outmask_ort_file} {outmask_finepoly_file} -f GeoJSON -mask {outmask_ort_file} -8',shell=True)
-                subprocess.call(f'ogr2ogr {outmask_poly_file} {outmask_finepoly_file} -f GeoJSON -lco RFC7946=YES -simplify {trans[1]*2}',shell=True)
+                subprocess.call(f'ogr2ogr {outmask_poly_file} {outmask_finepoly_file} -f GeoJSON -lco RFC7946=YES -simplify {trans[1]}',shell=True)
                 dcid_mask_tif_files.append(outmask_ort_file)
                 dcid_mask_poly_files.append(outmask_poly_file)
 
