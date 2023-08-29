@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 #
-#  Copyright 2022 California Institute of Technology
+#  Copyright 2023 California Institute of Technology
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-# ISOFIT: Imaging Spectrometer Optimal FITting
 # Authors: Philip G. Brodrick, philip.brodrick@jpl.nasa.gov
 
 import argparse
@@ -71,6 +70,9 @@ def main(input_args=None):
     # MF
     co2_mf_file = f'{args.output_base}_co2_mf'
     ch4_mf_file = f'{args.output_base}_ch4_mf'
+
+    # Flares
+    flare_file = f'{args.output_base}_flares.json'
 
     # MF - ORT
     co2_mf_ort_file = f'{args.output_base}_co2_mf_ort'
@@ -150,26 +152,22 @@ def main(input_args=None):
             subargs.append('--use_ace_filter')
         parallel_mf.main(subargs)
     
-    print(os.path.isfile(ch4_mf_file))
-    print(ch4_mf_file)
     if os.path.isfile(ch4_mf_file) is False or args.overwrite:
-        print('starting parallel mf')
-        subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, args.l1b_bandmask_file, args.l2a_mask_file]
+        logging.info('starting parallel mf')
+        subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, '--wavelength_range', '500', '2450', '--fixed_alpha', '0.0000000001', '--mask_clouds_water', '--mask_flares', '--flare_outfile', flare_file]
         if args.ace_filter:
             subargs.append('--use_ace_filter')
         parallel_mf.main(subargs)
 
-    if (os.path.isfile(co2_mf_refined_file) is False or args.overwrite) and args.co2:
-        #local_surface_control.main([co2_mf_file, args.radiance_file, args.loc_file, irr_file, co2_mf_refined_file, '--type', 'co2'])
-        local_surface_control_simple.main([co2_mf_file, args.radiance_file, args.l1b_bandmask_file, co2_mf_refined_file, '--type', 'co2'])
-    if os.path.isfile(ch4_mf_refined_file) is False or args.overwrite:
-        #local_surface_control.main([ch4_mf_file, args.radiance_file, args.loc_file, irr_file, ch4_mf_refined_file, '--type', 'ch4'])
-        local_surface_control_simple.main([ch4_mf_file, args.radiance_file, args.l1b_bandmask_file, ch4_mf_refined_file, '--type', 'ch4'])
+    #if (os.path.isfile(co2_mf_refined_file) is False or args.overwrite) and args.co2:
+    #    local_surface_control_simple.main([co2_mf_file, args.radiance_file, args.l1b_bandmask_file, co2_mf_refined_file, '--type', 'co2'])
+    #if os.path.isfile(ch4_mf_refined_file) is False or args.overwrite:
+    #    local_surface_control_simple.main([ch4_mf_file, args.radiance_file, args.l1b_bandmask_file, ch4_mf_refined_file, '--type', 'ch4'])
 
-    if (os.path.isfile(co2_mf_refined_ort_file) is False or args.overwrite) and args.co2:
-        subprocess.call(f'python apply_glt.py {args.glt_file} {co2_mf_refined_file} {co2_mf_refined_ort_file}',shell=True)
-    if os.path.isfile(ch4_mf_refined_ort_file) is False or args.overwrite:
-        subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_refined_file} {ch4_mf_refined_ort_file}',shell=True)
+    #if (os.path.isfile(co2_mf_refined_ort_file) is False or args.overwrite) and args.co2:
+    #    subprocess.call(f'python apply_glt.py {args.glt_file} {co2_mf_refined_file} {co2_mf_refined_ort_file}',shell=True)
+    #if os.path.isfile(ch4_mf_refined_ort_file) is False or args.overwrite:
+    #    subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_refined_file} {ch4_mf_refined_ort_file}',shell=True)
 
     if (os.path.isfile(co2_mf_ort_file) is False or args.overwrite) and args.co2:
         subprocess.call(f'python apply_glt.py {args.glt_file} {co2_mf_file} {co2_mf_ort_file}',shell=True)
@@ -177,15 +175,15 @@ def main(input_args=None):
         subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_file} {ch4_mf_ort_file}',shell=True)
     
     
-    if os.path.isfile(ch4_mf_refined_scaled_ort_file) is False or args.overwrite:
-        scale.main([ch4_mf_refined_ort_file, ch4_mf_refined_scaled_ort_file, '1', '500'])
-    if (os.path.isfile(co2_mf_refined_scaled_ort_file) is False or args.overwrite) and args.co2:
-        scale.main([co2_mf_refined_ort_file, co2_mf_refined_scaled_ort_file, '180', '11000'])
+    #if os.path.isfile(ch4_mf_refined_scaled_ort_file) is False or args.overwrite:
+    #    scale.main([ch4_mf_refined_ort_file, ch4_mf_refined_scaled_ort_file, '1', '500'])
+    #if (os.path.isfile(co2_mf_refined_scaled_ort_file) is False or args.overwrite) and args.co2:
+    #    scale.main([co2_mf_refined_ort_file, co2_mf_refined_scaled_ort_file, '180', '11000'])
 
-    if os.path.isfile(ch4_mf_refined_scaled_color_ort_file) is False or args.overwrite:
-        scale.main([ch4_mf_refined_ort_file, ch4_mf_refined_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
-    if (os.path.isfile(co2_mf_refined_scaled_color_ort_file) is False or args.overwrite) and args.co2:
-        scale.main([co2_mf_refined_ort_file, co2_mf_refined_scaled_color_ort_file, '1', '100000', '--cmap', 'YlOrRd'])
+    #if os.path.isfile(ch4_mf_refined_scaled_color_ort_file) is False or args.overwrite:
+    #    scale.main([ch4_mf_refined_ort_file, ch4_mf_refined_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
+    #if (os.path.isfile(co2_mf_refined_scaled_color_ort_file) is False or args.overwrite) and args.co2:
+    #    scale.main([co2_mf_refined_ort_file, co2_mf_refined_scaled_color_ort_file, '1', '100000', '--cmap', 'YlOrRd'])
 
     if os.path.isfile(ch4_mf_scaled_color_ort_file) is False or args.overwrite:
         scale.main([ch4_mf_ort_file, ch4_mf_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
@@ -193,44 +191,44 @@ def main(input_args=None):
         scale.main([co2_mf_ort_file, co2_mf_scaled_color_ort_file, '1', '100000', '--cmap', 'YlOrRd'])
 
 
-    if os.path.isfile(ch4_mf_refined_kmz_file) is False or args.overwrite:
-        hr_temp = f'{ch4_mf_refined_ort_file}_hrtemp'
-        subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {ch4_mf_refined_scaled_ort_file} {hr_temp} -dstnodata 0',shell=True)
-        subprocess.call(f'gdal_translate {hr_temp} {ch4_mf_refined_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
-        subprocess.call(f'rm {hr_temp}',shell=True)
+    #if os.path.isfile(ch4_mf_refined_kmz_file) is False or args.overwrite:
+    #    hr_temp = f'{ch4_mf_refined_ort_file}_hrtemp'
+    #    subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {ch4_mf_refined_scaled_ort_file} {hr_temp} -dstnodata 0',shell=True)
+    #    subprocess.call(f'gdal_translate {hr_temp} {ch4_mf_refined_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
+    #    subprocess.call(f'rm {hr_temp}',shell=True)
 
-    if (os.path.isfile(co2_mf_refined_kmz_file) is False or args.overwrite) and args.co2:
-        hr_temp = f'{co2_mf_refined_ort_file}_hrtemp'
-        subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {co2_mf_refined_scaled_ort_file} {hr_temp} -dstnodata 0',shell=True)
-        subprocess.call(f'gdal_translate {hr_temp} {co2_mf_refined_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
-        subprocess.call(f'rm {hr_temp}',shell=True)
-
-
-    if os.path.isfile(ch4_mf_refined_color_kmz_file) is False or args.overwrite:
-        hr_temp = f'{ch4_mf_refined_ort_file}_hrtemp'
-        subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {ch4_mf_refined_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
-        subprocess.call(f'gdal_translate {hr_temp} {ch4_mf_refined_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
-        subprocess.call(f'rm {hr_temp}',shell=True)
+    #if (os.path.isfile(co2_mf_refined_kmz_file) is False or args.overwrite) and args.co2:
+    #    hr_temp = f'{co2_mf_refined_ort_file}_hrtemp'
+    #    subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {co2_mf_refined_scaled_ort_file} {hr_temp} -dstnodata 0',shell=True)
+    #    subprocess.call(f'gdal_translate {hr_temp} {co2_mf_refined_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
+    #    subprocess.call(f'rm {hr_temp}',shell=True)
 
 
-    if os.path.isfile(co2_mf_refined_color_kmz_file) is False or args.overwrite:
-        hr_temp = f'{co2_mf_refined_ort_file}_hrtemp'
-        subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {co2_mf_refined_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
-        subprocess.call(f'gdal_translate {hr_temp} {co2_mf_refined_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
-        subprocess.call(f'rm {hr_temp}',shell=True)
+    #if os.path.isfile(ch4_mf_refined_color_kmz_file) is False or args.overwrite:
+    #    hr_temp = f'{ch4_mf_refined_ort_file}_hrtemp'
+    #    subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {ch4_mf_refined_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
+    #    subprocess.call(f'gdal_translate {hr_temp} {ch4_mf_refined_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
+    #    subprocess.call(f'rm {hr_temp}',shell=True)
 
 
-    if os.path.isfile(ch4_mf_color_kmz_file) is False or args.overwrite:
-        hr_temp = f'{ch4_mf_refined_ort_file}_hrtemp'
-        subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {ch4_mf_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
-        subprocess.call(f'gdal_translate {hr_temp} {ch4_mf_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
-        subprocess.call(f'rm {hr_temp}',shell=True)
+    #if os.path.isfile(co2_mf_refined_color_kmz_file) is False or args.overwrite:
+    #    hr_temp = f'{co2_mf_refined_ort_file}_hrtemp'
+    #    subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {co2_mf_refined_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
+    #    subprocess.call(f'gdal_translate {hr_temp} {co2_mf_refined_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
+    #    subprocess.call(f'rm {hr_temp}',shell=True)
 
-    if os.path.isfile(co2_mf_color_kmz_file) is False or args.overwrite:
-        hr_temp = f'{co2_mf_refined_ort_file}_hrtemp'
-        subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {co2_mf_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
-        subprocess.call(f'gdal_translate {hr_temp} {co2_mf_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
-        subprocess.call(f'rm {hr_temp}',shell=True)
+
+    #if os.path.isfile(ch4_mf_color_kmz_file) is False or args.overwrite:
+    #    hr_temp = f'{ch4_mf_refined_ort_file}_hrtemp'
+    #    subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {ch4_mf_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
+    #    subprocess.call(f'gdal_translate {hr_temp} {ch4_mf_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
+    #    subprocess.call(f'rm {hr_temp}',shell=True)
+
+    #if os.path.isfile(co2_mf_color_kmz_file) is False or args.overwrite:
+    #    hr_temp = f'{co2_mf_refined_ort_file}_hrtemp'
+    #    subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {co2_mf_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
+    #    subprocess.call(f'gdal_translate {hr_temp} {co2_mf_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
+    #    subprocess.call(f'rm {hr_temp}',shell=True)
 
 
  

@@ -22,20 +22,36 @@ import subprocess
 import os
 from utils import envi_header
 from glob import glob
+import json
+import numpy as np
 
 
 
 def main(input_args=None):
     parser = argparse.ArgumentParser(description="Robust MF")
-    parser.add_argument('date', type=str,  metavar='DATE', help='path to input image')   
     parser.add_argument('output_dir', type=str,  metavar='OUTPUT', help='path to input image')   
     parser.add_argument('--co2', action='store_true', help='flag to indicate whether to run co2')    
+    parser.add_argument('--methane_metadata', type=str, default='visions_delivery/combined_plume_metadata.json', help='file_with_idd_methane_plumes')    
     args = parser.parse_args(input_args)
 
-    if args.date == 'all':
-        rdn_files = glob(f'/beegfs/store/emit/ops/data/acquisitions/*/emit*/l1b/*_rdn_b0106_v01.img')
-    else:
-        rdn_files = glob(f'/beegfs/store/emit/ops/data/acquisitions/{args.date}/emit*/l1b/*_rdn_b0106_v01.img')
+    plumedict = json.load(open(args.methane_metadata,'r'))
+
+    fids = [x['properties']['Scene FID'] for x in plumedict['features']]
+
+    un_fids = np.unique(fids)
+    rdn_files = []
+    for fid in un_fids:
+        glist = glob(f'/beegfs/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid}/l1b/*_rdn_b0106_v01.img')
+        if len(glist) > 0:
+            rdn_files.append(glist[0])
+        else:
+            rdn_files.append(None)
+    for _fid in range(len(rdn_files)-1,-1,-1):
+        if rdn_files[_fid] is None:
+            rdn_files.pop(_fid)
+            fids.pop(_fid)
+    un_fids = np.unique(fids)
+
     obs_files = [x.replace('rdn','obs') for x in rdn_files]
     loc_files = [x.replace('rdn','loc') for x in rdn_files]
     glt_files = [x.replace('rdn','glt') for x in rdn_files]
@@ -45,16 +61,18 @@ def main(input_args=None):
     state_files = [x.replace('l1b','l2a').replace('rdn','statesubs') for x in rdn_files]
     state_files = [x if os.path.isfile(x) else None for x in state_files]
 
-    if os.path.isdir(os.path.join(args.output_dir, args.date)) is False:
-        subprocess.call(f'mkdir {os.path.join(args.output_dir, args.date)}',shell=True)
+    for fid in un_fids:
+        date = fid[4:12]
+        if os.path.isdir(os.path.join(args.output_dir, date)) is False:
+            subprocess.call(f'mkdir {os.path.join(args.output_dir, date)}',shell=True)
         
-    out_files = [os.path.join(args.output_dir, args.date, os.path.basename(x).split('_')[0]) for x in rdn_files]
+    out_files = [os.path.join(args.output_dir, os.path.basename(x).split('_')[0][4:12], os.path.basename(x).split('_')[0]) for x in rdn_files]
 
     n=0
     for _r in range(len(rdn_files)):
 
-      ch4_mf_kmz_file = f'{out_files[_r]}_ch4_mf_scaled_color_ort.tif'
-      co2_mf_kmz_file = f'{out_files[_r]}_co2_mf_scaled_color_ort.tif'
+      ch4_mf_kmz_file = f'{out_files[_r]}_ch4_mf_color.kmz'
+      co2_mf_kmz_file = f'{out_files[_r]}_co2_mf_color.kmz'
 
       launch = os.path.isfile(ch4_mf_kmz_file) is False
       if os.path.isfile(ch4_mf_kmz_file) is False or (args.co2 and os.path.isfile(co2_mf_kmz_file) is False):
@@ -76,3 +94,4 @@ def main(input_args=None):
 
 if __name__ == '__main__':
     main()
+

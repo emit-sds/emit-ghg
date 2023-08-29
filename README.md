@@ -10,6 +10,8 @@ python ghg_process.py
        obs_file
        loc_file
        glt_file
+       l1b_bandmask_file
+       l2a_mask_file
        output_base
        --state_subs  
        --loglevel

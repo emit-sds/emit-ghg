@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 #
-#  Copyright 2022 California Institute of Technology
+#  Copyright 2023 California Institute of Technology
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -14,10 +14,11 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-# ISOFIT: Imaging Spectrometer Optimal FITting
 # Authors: Philip G. Brodrick, philip.brodrick@jpl.nasa.gov
 
 import os
+import numpy as np
+import json
 
 def envi_header(inputpath):
     """
@@ -43,4 +44,34 @@ def envi_header(inputpath):
         return inputpath + '.hdr'
 
 
+def write_bil_chunk(dat, outfile, line, shape, dtype = 'float32'):
+    """
+    Write a chunk of data to a binary, BIL formatted data cube.
+    Args:
+        dat: data to write
+        outfile: output file to write to
+        line: line of the output file to write to
+        shape: shape of the output file
+        dtype: output data type
+
+    Returns:
+        None
+    """
+    outfile = open(outfile, 'rb+')
+    outfile.seek(line * shape[1] * shape[2] * np.dtype(dtype).itemsize)
+    outfile.write(dat.astype(dtype).tobytes())
+    outfile.close()
+
+
+class SerialEncoder(json.JSONEncoder):
+    """Encoder for json to help ensure json objects can be passed to the workflow manager.
+    """
+
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        else:
+            return super(SerialEncoder, self).default(obj)
 

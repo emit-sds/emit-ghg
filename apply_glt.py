@@ -1,36 +1,28 @@
+#! /usr/bin/env python
+#
+#  Copyright 2023 California Institute of Technology
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+#
+# Authors: Philip G. Brodrick, philip.brodrick@jpl.nasa.gov
+
 import argparse
 import numpy as np
-import pandas as pd
 from osgeo import gdal
 from spectral.io import envi
-import logging
-import ray
-from typing import List
-import time
-import os
-import multiprocessing
 
 from emit_utils.file_checks import envi_header
-
-def _write_bil_chunk(dat, outfile, line, shape, dtype = 'float32'):
-    """
-    Write a chunk of data to a binary, BIL formatted data cube.
-    Args:
-        dat: data to write
-        outfile: output file to write to
-        line: line of the output file to write to
-        shape: shape of the output file
-        dtype: output data type
-
-    Returns:
-        None
-    """
-    outfile = open(outfile, 'rb+')
-    outfile.seek(line * shape[1] * shape[2] * np.dtype(dtype).itemsize)
-    outfile.write(dat.astype(dtype).tobytes())
-    outfile.close()
-
-
+from utils import write_bil_chunk
 
 def single_image_ortho(img_dat, in_glt, glt_nodata_value=0):
     """Orthorectify a single image
@@ -87,7 +79,7 @@ def main(input_args=None):
             outDataset.GetRasterBand(_b).SetDescription(band_names[_b-1])
     del outDataset
 
-    _write_bil_chunk(ort_img.transpose((0,2,1)), args.out_file, 0, (glt.shape[0], ort_img.shape[-1], glt.shape[1]))
+    write_bil_chunk(ort_img.transpose((0,2,1)), args.out_file, 0, (glt.shape[0], ort_img.shape[-1], glt.shape[1]))
 
 
 

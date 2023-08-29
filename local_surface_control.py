@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 #
-#  Copyright 2022 California Institute of Technology
+#  Copyright 2023 California Institute of Technology
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -20,9 +20,7 @@
 
 from spectral.io import envi 
 import scipy as s
-from sklearn.cross_decomposition import PLSRegression
 from sklearn import linear_model
-from sklearn import tree
 import argparse
 from utils import envi_header
 import ray
@@ -31,7 +29,6 @@ import numpy as np
 import os
 from isofit.core.common import resample_spectrum
 from isofit.core.sunposition import sunpos
-from scipy.ndimage.morphology import distance_transform_edt
 
 
 @ray.remote
@@ -164,10 +161,6 @@ def get_mask(rdnfile, locfile, irrfile):
         rho[start_line:stop_line,...] = lr
 
     outmask = np.sum(mask[:, 0:3,:],axis=1) > 0
-    #outmask[mask[:,6] == 1] = True
-    #cloud_distance = distance_transform_edt(outmask)
-    #invalid = (np.squeeze(mask[:, 4, :]) >= cloud_distance)
-    #outmask[invalid] = True
 
     return outmask, rho
 

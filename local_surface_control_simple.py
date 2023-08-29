@@ -1,6 +1,6 @@
 #! /usr/bin/env python
 #
-#  Copyright 2022 California Institute of Technology
+#  Copyright 2023 California Institute of Technology
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -22,18 +22,10 @@ from spectral.io import envi
 import scipy as s
 from sklearn.cross_decomposition import PLSRegression
 from sklearn import linear_model
-from sklearn import tree
 import argparse
 from utils import envi_header
 import ray
-from datetime import datetime
 import numpy as np
-import os
-from isofit.core.common import resample_spectrum
-from isofit.core.sunposition import sunpos
-from scipy.ndimage.morphology import distance_transform_edt
-
-
 
 
 @ray.remote
