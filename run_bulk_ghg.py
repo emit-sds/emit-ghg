@@ -45,13 +45,16 @@ def main(input_args=None):
     state_files = [x.replace('l1b','l2a').replace('rdn','statesubs') for x in rdn_files]
     state_files = [x if os.path.isfile(x) else None for x in state_files]
 
-    out_files = [os.path.join(args.output_dir, os.path.basename(x).split('_')[0]) for x in rdn_files]
+    if os.path.isdir(os.path.join(args.output_dir, args.date)) is False:
+        subprocess.call(f'mkdir {os.path.join(args.output_dir, args.date)}',shell=True)
+        
+    out_files = [os.path.join(args.output_dir, args.date, os.path.basename(x).split('_')[0]) for x in rdn_files]
 
     n=0
     for _r in range(len(rdn_files)):
 
-      ch4_mf_kmz_file = f'{out_files[_r]}_ch4_mf_color.kmz'
-      co2_mf_kmz_file = f'{out_files[_r]}_co2_mf_color.kmz'
+      ch4_mf_kmz_file = f'{out_files[_r]}_ch4_mf_scaled_color_ort.tif'
+      co2_mf_kmz_file = f'{out_files[_r]}_co2_mf_scaled_color_ort.tif'
 
       launch = os.path.isfile(ch4_mf_kmz_file) is False
       if os.path.isfile(ch4_mf_kmz_file) is False or (args.co2 and os.path.isfile(co2_mf_kmz_file) is False):
