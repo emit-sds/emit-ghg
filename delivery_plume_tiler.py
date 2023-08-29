@@ -13,13 +13,21 @@ import pandas as pd
 import time
 import json
 import glob
-from scrape_refine_upload import write_color_plume
+from scrape_refine_upload import write_color_plume, rawspace_coordinate_conversion
 from apply_glt import single_image_ortho
 from copy import deepcopy
-from scrape_refine_upload_ms import rawspace_coordinate_conversion
 from rasterio.features import rasterize
 from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
+
+if os.environ.get("GHG_DEBUG"):
+    logging.info("Using internal ray")
+    import rray as ray
+else:
+    import ray
+
+
+
 
 class SerialEncoder(json.JSONEncoder):
     """Encoder for json to help ensure json objects can be passed to the workflow manager.
@@ -47,7 +55,7 @@ def write_science_cog(output_img, output_file, geotransform, projection, metadat
     outDataset.SetGeoTransform(geotransform)
     del outDataset
 
-    subprocess.call(f'sh /home/brodrick/bin/cog.sh {tmp_file} {output_file}',shell=True)
+    subprocess.call(f'sh /home/brodrick/bin/cog.sh {tmp_file} {output_file} 1',shell=True)
     subprocess.call(f'rm {tmp_file}',shell=True)
 
 
@@ -76,6 +84,7 @@ def tile_dcid(features, outdir, datadir):
     subprocess.call(cmd_str,shell=True)
     
 
+@ray.remote
 def single_plume_proc(all_plume_meta, index, output_base, dcid_sourcedir, source_dir, extra_metadata):
 
         plume_dict = {"crs": {"properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84" }, "type": "name"},"features":[],"name":"methane_metadata","type":"FeatureCollection" }
@@ -150,7 +159,7 @@ def write_color_quicklook(indat, output_file):
     dst_ds = driver.CreateCopy(output_file, outDataset, strict=0)
     del dst_ds, outDataset
     
-
+@ray.remote
 def single_scene_proc(input_file, output_file, extra_metadata):
     ds = gdal.Open(input_file)
     dat = ds.ReadAsArray().squeeze()
@@ -170,6 +179,7 @@ def main(input_args=None):
     parser.add_argument('--software_version', type=str, default=None)
     parser.add_argument('--data_version', type=str, default=None)
     parser.add_argument('--visions_delivery', type=int, choices=[0,1,2],default=0)
+    parser.add_argument('--n_cores', type=int, default=1)
     parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')    
     args = parser.parse_args(input_args)
@@ -187,9 +197,12 @@ def main(input_args=None):
 
     plume_count = 1
 
+    ray.init(num_cpus=args.n_cores)
+
     if args.visions_delivery != 2:
+        jobs = []
         for _feat, feat in enumerate(all_plume_meta['features']):
-            logging(f'Processing plume {_feat+1}/{len(all_plume_meta["features"])}')
+            logging.info(f'Processing plume {_feat+1}/{len(all_plume_meta["features"])}')
 
             extra_metadata = {}
             if args.software_version:
@@ -225,15 +238,19 @@ def main(input_args=None):
                 outdir=os.path.join(args.dest_dir, feat['properties']['Scene FIDs'][0][4:12], 'l2bch4plm')
                 if os.path.isdir(outdir) is False:
                     subprocess.call(f'mkdir -p {outdir}',shell=True)
-                single_plume_proc(all_plume_meta, _feat, os.path.join(outdir, feat['properties']['Scene FIDs'][0] + '_' + feat['properties']['Plume ID']), args.manual_del_dir, args.source_dir, extra_metadata)
+                jobs.append(single_plume_proc.remote(all_plume_meta, _feat, os.path.join(outdir, feat['properties']['Scene FIDs'][0] + '_' + feat['properties']['Plume ID']), args.manual_del_dir, args.source_dir, extra_metadata))
+
+        rreturn = [ray.get(jid) for jid in jobs]
 
 
-
+        jobs = []
         for fid in unique_fids:
             outdir = os.path.join(args.dest_dir, fid[4:12], 'l2bch4enh')
             if os.path.isdir(outdir) is False:
                 subprocess.call(f'mkdir -p {outdir}',shell=True)
-            single_scene_proc(os.path.join(args.source_dir, fid[4:12], fid + '_ch4_mf_ort'),  os.path.join(outdir, fid + 'ch4_enh.tif'), extra_metadata)
+            jobs.append(single_scene_proc.remote(os.path.join(args.source_dir, fid[4:12], fid + '_ch4_mf_ort'),  os.path.join(outdir, fid + 'ch4_enh.tif'), extra_metadata))
+        rreturn = [ray.get(jid) for jid in jobs]
+
 
 
     if args.visions_delivery == 1 or args.visions_delivery == 2:
@@ -246,15 +263,8 @@ def main(input_args=None):
         if os.path.isdir(outdir) is False:
             subprocess.call(f'mkdir -p {outdir}',shell=True)
 
-        for _dcid, dcid in enumerate(unique_dcids):
-            logging.info(f'Tiling {_dcid + 1} / {len(unique_dcids)}')
-            match_idx = np.where(dcids == dcid)[0]
-            
-            subfeatures = [feat for _feat, feat in enumerate(all_plume_meta['features']) if _feat in match_idx and _feat in visions_plume_idx]
-            if len(subfeatures) > 0:
-                tile_dcid(subfeatures, outdir, args.manual_del_dir)
 
-
+        logging.info('Build output geojson')
         outdict = {"crs": {"properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84" }, "type": "name"},"features":[],"name":"methane_metadata","type":"FeatureCollection" }
         for nmi in visions_plume_idx:
             newfeat = all_plume_meta['features'][nmi].copy()
@@ -272,12 +282,18 @@ def main(input_args=None):
                         break
                 plume_count += 1
 
-
-
         with open(os.path.join(args.dest_dir, 'combined_plume_metadata.json'), 'w') as fout:
             fout.write(json.dumps(outdict, cls=SerialEncoder)) 
 
     
+        logging.info('Tile output')
+        for _dcid, dcid in enumerate(unique_dcids):
+            logging.info(f'Tiling {_dcid + 1} / {len(unique_dcids)}')
+            match_idx = np.where(dcids == dcid)[0]
+            
+            subfeatures = [feat for _feat, feat in enumerate(all_plume_meta['features']) if _feat in match_idx and _feat in visions_plume_idx]
+            if len(subfeatures) > 0:
+                tile_dcid(subfeatures, outdir, args.manual_del_dir)
 
     
 
