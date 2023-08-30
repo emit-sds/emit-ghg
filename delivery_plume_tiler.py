@@ -197,6 +197,9 @@ def main(input_args=None):
     dcids = np.array([feat['properties']['DCID'] for feat in all_plume_meta['features']])
     unique_dcids = np.unique(dcids)
 
+    valid_plume_idx = [x for x, feat  in enumerate(all_plume_meta['features']) if feat['properties']['style']['color'] == 'white' and feat['geometry']['type'] == 'Polygon']
+    valid_point_idx = [x for x, feat  in enumerate(all_plume_meta['features']) if feat['properties']['style']['color'] == 'white' and feat['geometry']['type'] == 'Point']
+
     plume_count = 1
 
     ray.init(num_cpus=args.n_cores)
@@ -204,6 +207,8 @@ def main(input_args=None):
     if args.visions_delivery != 2:
         jobs = []
         for _feat, feat in enumerate(all_plume_meta['features']):
+            if _feat not in valid_plume_idx:
+                continue
             logging.info(f'Processing plume {_feat+1}/{len(all_plume_meta["features"])}')
 
             extra_metadata = {}
@@ -264,10 +269,6 @@ def main(input_args=None):
 
     if args.visions_delivery == 1 or args.visions_delivery == 2:
 
-        visions_plume_idx = [x for x, feat  in enumerate(all_plume_meta['features']) if feat['properties']['style']['color'] == 'white' and feat['geometry']['type'] == 'Polygon']
-        visions_point_idx = [x for x, feat  in enumerate(all_plume_meta['features']) if feat['properties']['style']['color'] == 'white' and feat['geometry']['type'] == 'Point']
-
-
         outdir = os.path.join(args.dest_dir, 'visions_ch4_tiles')
         if os.path.isdir(outdir) is False:
             subprocess.call(f'mkdir -p {outdir}',shell=True)
@@ -275,14 +276,14 @@ def main(input_args=None):
 
         logging.info('Build output geojson')
         outdict = {"crs": {"properties": {"name": "urn:ogc:def:crs:OGC:1.3:CRS84" }, "type": "name"},"features":[],"name":"methane_metadata","type":"FeatureCollection" }
-        for nmi in visions_plume_idx:
+        for nmi in valid_plume_idx:
             newfeat = all_plume_meta['features'][nmi].copy()
             pc = newfeat['properties']['Plume ID']
             if newfeat['geometry']['type'] == 'Polygon':
                 newfeat['properties']['plume_complex_count'] = plume_count
                 outdict['features'].append(newfeat)
 
-                for npi in visions_point_idx:
+                for npi in valid_point_idx:
                     pointfeat = all_plume_meta['features'][npi].copy()
                     if pointfeat['properties']['Plume ID'] == newfeat['properties']['Plume ID']:
                         pointfeat['properties']['plume_complex_count'] = plume_count
@@ -300,7 +301,7 @@ def main(input_args=None):
             logging.info(f'Tiling {_dcid + 1} / {len(unique_dcids)}')
             match_idx = np.where(dcids == dcid)[0]
             
-            subfeatures = [feat for _feat, feat in enumerate(all_plume_meta['features']) if _feat in match_idx and _feat in visions_plume_idx]
+            subfeatures = [feat for _feat, feat in enumerate(all_plume_meta['features']) if _feat in match_idx and _feat in valid_plume_idx]
             if len(subfeatures) > 0:
                 tile_dcid(subfeatures, outdir, args.manual_del_dir)
 
