@@ -132,6 +132,8 @@ def single_plume_proc(all_plume_meta, index, output_base, dcid_sourcedir, source
         plume_output_file = os.path.join(output_base + '.json')
         # conger the DAAC Scene Numbers to full dac names, as above
         plume_dict['features'][0]['properties']['DAAC Scene Names'] = scene_names
+        del plume_dict['features'][0]['properties']['style']
+        del plume_dict['features'][0]['properties']['Data Download']
         with open(plume_output_file, 'w') as fout:
             fout.write(json.dumps(plume_dict, cls=SerialEncoder)) 
 
@@ -207,6 +209,13 @@ def main(input_args=None):
             extra_metadata = {}
             if args.software_version:
                 extra_metadata['software_build_version'] = args.software_version
+            else:
+                cmd = ["git", "symbolic-ref", "-q", "--short", "HEAD", "||", "git", "describe", "--tags", "--exact-match"]
+                output = subprocess.run(" ".join(cmd), shell=True, capture_output=True)
+                if output.returncode != 0:
+                    raise RuntimeError(output.stderr.decode("utf-8"))
+                extra_metadata['software_build_version'] = output.stdout.decode("utf-8").replace("\n", "")
+
             if args.data_version:
                 extra_metadata['product_version'] = args.data_version
             extra_metadata['keywords'] = "Imaging Spectroscopy, minerals, EMIT, dust, radiative forcing"
