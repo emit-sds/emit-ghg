@@ -67,6 +67,7 @@ def main(input_args=None):
     parser.add_argument('--target_scaling', type=str,choices=['mean','pixel'],default='mean', help='value to scale absorption coefficients by')    
     parser.add_argument('--nodata_value', type=float, default=-9999, help='output nodata value')         
     parser.add_argument('--flare_outfile', type=str, default=None, help='output geojson to write flare location centers')         
+    parser.add_argument('--chunksize', type=int, default=None, help='chunk radiance (for memory issues with large scenes)')         
     parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')         
     args = parser.parse_args(input_args)
@@ -113,42 +114,6 @@ def main(input_args=None):
     logging.info("load target library")
     library_reference = np.float64(np.loadtxt(args.library))
     absorption_coefficients = library_reference[active_wl_idx,2]
- 
-    logging.info("load radiance")
-    radiance = ds.open_memmap(interleave='bil',writeable=False).copy()
-
-    logging.info("load masks")
-    good_pixel_mask = np.ones((radiance.shape[0],radiance.shape[2]),dtype=bool)
-    saturation = None
-    if args.l1b_bandmask_file is not None:
-        logging.debug("loading pixel mask")
-        dilated_saturation, saturation = calculate_saturation_mask(args.l1b_bandmask_file)
-        good_pixel_mask[dilated_saturation] = False
-
-    logging.debug("adding flare mask")
-    dilated_flare_mask, flare_mask = calculate_flare_mask(radiance, good_pixel_mask, wavelengths)
-    good_pixel_mask[dilated_flare_mask] = False
-
-    if args.flare_outfile is not None:
-        logging.info(f'writing flare locations to {args.flare_outfile}')
-        write_hotspot_vector(args.flare_outfile, flare_mask, saturation)
-
-    logging.debug("adding cloud / water mask")
-    clouds_and_surface_water_mask = None
-    if args.l2a_mask_file is not None:
-        clouds_and_surface_water_mask = np.sum(envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')[...,:3],axis=-1) > 0
-        good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
-
-    logging.info('initializing ray, adding data to shared memory')
-    rayargs = {'_temp_dir': args.ray_temp_dir, 'ignore_reinit_error': True, 'include_dashboard': False}
-    rayargs['num_cpus'] = args.num_cores
-    if args.num_cores == -1:
-        import multiprocessing
-        rayargs['num_cpus'] = multiprocessing.cpu_count() - 1
-    ray.init(**rayargs)
-    rdn_id = ray.put(radiance)
-    absorption_coefficients_id = ray.put(absorption_coefficients)
-    del radiance, absorption_coefficients
 
     logging.info('Create output file, initialized with nodata')
     outmeta = ds.metadata
@@ -167,38 +132,84 @@ def main(input_args=None):
     output_shape = (int(outmeta['lines']),int(outmeta['bands']),int(outmeta['samples']))
     write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.output_file, 0, output_shape)
 
-    logging.info('Run jobs')
-    jobs = [mf_one_column.remote(col, rdn_id, absorption_coefficients_id, active_wl_idx, good_pixel_mask, args) for col in range(output_shape[2])]
-    rreturn = [ray.get(jid) for jid in jobs]
+ 
+    if args.chunksize is None:
+        chunk_edges = [0, output_shape[0]]
+    else:
+        chunk_edges = np.arange(0, output_shape[0], args.chunksize).tolist()
+        chunk_edges.append(output_shape[0])
 
-    logging.info('Collecting and writing output')
-    output_dat = np.zeros(output_shape,dtype=np.float32)
-    for ret in rreturn:
-        if ret[0] is not None:
-            output_dat[:, 0, ret[1]] = ret[0][:,0]
+    for _ce, ce in enumerate(chunk_edges[:-1]):
+        
+        logging.info(f"load radiance for chunk {_ce +1} / {len(chunk_edges) - 1}}")
+        radiance = ds.open_memmap(interleave='bil',writeable=False)[ce:chunk_edges[_ce+1],...].copy()
+        chunk_shape = (chunk_edges[_ce+1] - ce, output_shape[1], output_shape[2])
+
+        logging.info("load masks")
+        good_pixel_mask = np.ones((radiance.shape[0],radiance.shape[2]),dtype=bool)
+        saturation = None
+        if args.l1b_bandmask_file is not None:
+            logging.debug("loading pixel mask")
+            dilated_saturation, saturation = calculate_saturation_mask(args.l1b_bandmask_file, chunk_edges=[ce,chunk_edges[_ce+1]])
+            good_pixel_mask[dilated_saturation] = False
+
+        logging.debug("adding flare mask")
+        dilated_flare_mask, flare_mask = calculate_flare_mask(radiance, good_pixel_mask, wavelengths, chunk_edges=[ce,chunk_edges[_ce+1]])
+        good_pixel_mask[dilated_flare_mask] = False
+
+        if args.flare_outfile is not None:
+            logging.info(f'writing flare locations to {args.flare_outfile}')
+            write_hotspot_vector(args.flare_outfile, flare_mask, saturation)
+
+        logging.debug("adding cloud / water mask")
+        clouds_and_surface_water_mask = None
+        if args.l2a_mask_file is not None:
+            clouds_and_surface_water_mask = np.sum(envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')[ce:chunk_edges[_ce+1],:,:3],axis=-1) > 0
+            good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
+
+        logging.info('initializing ray, adding data to shared memory')
+        rayargs = {'_temp_dir': args.ray_temp_dir, 'ignore_reinit_error': True, 'include_dashboard': False}
+        rayargs['num_cpus'] = args.num_cores
+        if args.num_cores == -1:
+            import multiprocessing
+            rayargs['num_cpus'] = multiprocessing.cpu_count() - 1
+        ray.init(**rayargs)
+        rdn_id = ray.put(radiance)
+        absorption_coefficients_id = ray.put(absorption_coefficients)
+        del radiance, absorption_coefficients
+
+
+        logging.info('Run jobs')
+        jobs = [mf_one_column.remote(col, rdn_id, absorption_coefficients_id, active_wl_idx, good_pixel_mask, args) for col in range(output_shape[2])]
+        rreturn = [ray.get(jid) for jid in jobs]
+
+        logging.info('Collecting and writing output')
+        output_dat = np.zeros(chunk_shape,dtype=np.float32)
+        for ret in rreturn:
+            if ret[0] is not None:
+                output_dat[:, 0, ret[1]] = ret[0][:,0]
     
-    if args.mask_clouds_water and clouds_and_surface_water_mask is not None:
-        logging.info('Masking clouds and water')
-        output_dat = output_dat.transpose((0,2,1))
-        output_dat[clouds_and_surface_water_mask,:] = 0 # could be nodata, but setting to 0 keeps maps continuous
-        output_dat = output_dat.transpose((0,2,1))
+        if args.mask_clouds_water and clouds_and_surface_water_mask is not None:
+            logging.info('Masking clouds and water')
+            output_dat = output_dat.transpose((0,2,1))
+            output_dat[clouds_and_surface_water_mask,:] = 0 # could be nodata, but setting to 0 keeps maps continuous
+            output_dat = output_dat.transpose((0,2,1))
 
-    if args.mask_saturation and saturation is not None:
-        logging.info('Masking saturation')
-        output_dat = output_dat.transpose((0,2,1))
-        output_dat[saturation,:] = 0 # could be nodata, but setting to 0 keeps maps continuous
-        output_dat = output_dat.transpose((0,2,1))
+        if args.mask_saturation and saturation is not None:
+            logging.info('Masking saturation')
+            output_dat = output_dat.transpose((0,2,1))
+            output_dat[saturation,:] = 0 # could be nodata, but setting to 0 keeps maps continuous
+            output_dat = output_dat.transpose((0,2,1))
 
-    if args.mask_flares and saturation is not None:
-        logging.info('Masking saturation')
-        output_dat = output_dat.transpose((0,2,1))
-        output_dat[dilated_saturation,:] = -1 # could be nodata, but setting to 0 keeps maps continuous
-        output_dat[dilated_flare_mask,:] = -1 # could be nodata, but setting to 0 keeps maps continuous
-        output_dat = output_dat.transpose((0,2,1))
+        if args.mask_flares and saturation is not None:
+            logging.info('Masking saturation')
+            output_dat = output_dat.transpose((0,2,1))
+            output_dat[dilated_saturation,:] = -1 # could be nodata, but setting to 0 keeps maps continuous
+            output_dat[dilated_flare_mask,:] = -1 # could be nodata, but setting to 0 keeps maps continuous
+            output_dat = output_dat.transpose((0,2,1))
 
-
-    write_bil_chunk(output_dat, args.output_file, 0, output_shape)
-    logging.info('Complete')
+        write_bil_chunk(output_dat, args.output_file, ce, chunk_shape)
+        logging.info('Complete')
 
 
 def np2envitype(np_dtype):
@@ -344,8 +355,11 @@ def get_mc_subset(mc_iteration: int, args, good_pixel_idx: np.array):
     return cov_subset
 
 
-def calculate_saturation_mask(bandmask_file: str, dilation_iterations=10):
-    l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[:,:,:]
+def calculate_saturation_mask(bandmask_file: str, dilation_iterations=10, chunk_edges=None):
+    if chunk_edges is None:
+        l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[:,:,:]
+    else:
+        l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[chunk_edges[0]:chunk_edges[1],:,:]
     l1b_bandmask_unpacked = np.unpackbits(l1b_bandmask_loaded, axis= -1)
     l1b_bandmask_summed = np.sum(l1b_bandmask_unpacked, axis = -1)
     saturation_mask = l1b_bandmask_summed - np.min(l1b_bandmask_summed, axis = 0)
@@ -353,9 +367,12 @@ def calculate_saturation_mask(bandmask_file: str, dilation_iterations=10):
     return np.logical_not(dilated_saturation_mask), saturation_mask != 0
 
 
-def calculate_flare_mask(radiance: np.array, preflagged_pixels: np.array, wavelengths: np.array):
+def calculate_flare_mask(radiance: np.array, preflagged_pixels: np.array, wavelengths: np.array, chunk_edges=None):
     b270_idx = np.argmin(np.abs(wavelengths - 2389.486)) 
-    hot_mask = np.where(np.logical_and(radiance[:,b270_idx,:] > 1.5, preflagged_pixels == True), 1., 0.)
+    if chunk_edges is None:
+        hot_mask = np.where(np.logical_and(radiance[:,b270_idx,:] > 1.5, preflagged_pixels == True), 1., 0.)
+    else:
+        hot_mask = np.where(np.logical_and(radiance[chunk_edges[0]:chunk_edges[1],b270_idx,:] > 1.5, preflagged_pixels == True), 1., 0.)
     hot_mask_dilated = scipy.ndimage.uniform_filter(hot_mask, [5,5]) > 0.01
     return hot_mask_dilated, hot_mask
 
