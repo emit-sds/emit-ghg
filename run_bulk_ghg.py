@@ -67,6 +67,7 @@ def main(input_args=None):
             cmd_str += f' --state_subs {state_files[_r]}"'
         else:
             cmd_str += f'"'
+            continue
 
         print(cmd_str)
 

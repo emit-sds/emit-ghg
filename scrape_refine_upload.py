@@ -160,13 +160,13 @@ def add_fids(manual_annotations, coverage, manual_annotations_previous):
             updated_plumes.append(_feat)
 
     for td in np.array(todel)[::-1]:
-        msg = f'Deleting entry due to bad metadata - check input {manual_annotations_fid["features"][td]}'
+        msg = f'Deleting entry due to bad metadata - check input {manual_annotations_fid["features"][td]["properties"]}'
         logging.warning(msg)
-        del manual_annotations_fid['features'][td]
+        manual_annotations_fid['features'].pop(td)
 
-    updated_plumes = np.array([x for x in updated_plumes if x not in todel])
-    for td in todel:
-        updated_plumes[updated_plumes > td] -= 1
+    updated_plumes = np.array([x for x in updated_plumes if x not in todel]) # shouldn't be necessary anymore, deosn't hurt
+    for td in np.array(todel)[::-1]:
+        updated_plumes[updated_plumes >= td] -= 1
     updated_plumes = updated_plumes.tolist()
 
     return manual_annotations_fid, updated_plumes
@@ -338,6 +338,12 @@ def main(input_args=None):
 
         # Step through each new plume
         manual_annotations, new_plumes = add_fids(manual_annotations, coverage, manual_annotations_previous)
+        double_approved_count = np.sum([ np.all([x['properties'][k] for k in ['R1 - Reviewed', 'R1 - VISIONS', 'R2 - Reviewed', 'R2 - VISIONS']]) for x in manual_annotations['features']])
+        r1_review_count = np.sum([ x['properties']['R1 - Reviewed'] is False for x in manual_annotations['features']])
+        r2_review_count = np.sum([ np.all([x['properties'][k] for k in ['R1 - Reviewed', 'R1 - VISIONS']]) and not x['properties']['R2 - Reviewed'] for x in manual_annotations['features']])
+        print(f'Plume Complexes Approved for VISIONS: {double_approved_count}')
+        print(f'R1 Review Deck: {r1_review_count}')
+        print(f'R2 Review Deck: {r2_review_count}')
         # If there's nothing new, sleep and retry
         if len(new_plumes) == 0:
             time.sleep(10)
@@ -353,6 +359,10 @@ def main(input_args=None):
         unique_fids = np.unique([sublist for x in new_plumes for sublist in manual_annotations['features'][x]['properties']['fids']])
         unique_orbits = np.unique([manual_annotations['features'][x]['properties']['orbit'] for x in new_plumes]).tolist()
         unique_dcids = np.unique([manual_annotations['features'][x]['properties']['dcid'] for x in new_plumes]).tolist()
+
+        for feat in manual_annotations['features']:
+            if 'dcid' not in feat['properties'].keys():
+                print('nodcid:  ', feat)
 
 
         for dcid in unique_dcids:

@@ -19,6 +19,7 @@ from copy import deepcopy
 from rasterio.features import rasterize
 from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
+import requests
 
 if os.environ.get("GHG_DEBUG"):
     logging.info("Using internal ray")
@@ -169,8 +170,16 @@ def single_scene_proc(input_file, output_file, extra_metadata):
     write_color_quicklook(dat, output_file.replace('.tif','.png'))
 
 
+def get_daac_link(feature, product_version, outbasedir):
+    prod_v = product_version.split('V')[-1]
+    fid=feature['Scene FIDs'][0]
+    cid= feature['Plume ID'].split('-')[-1].zfill(6)
+    link = f'https://data.lpdaac.earthdatacloud.nasa.gov/lp-prod-protected/EMITL2BCH4PLM.{prod_v}/EMIT_L2B_CH4PLM_{prod_v}_{fid[4:12]}T{fid[13:19]}_{cid}/EMIT_L2B_CH4PLM_{prod_v}_{fid[4:12]}T{fid[13:19]}_{cid}.tif'
 
-
+    if len(glob.glob(os.path.join(outbasedir, fid[4:12], 'l2bch4plm', f'EMIT_L2B_CH4PLM_{prod_v}_{fid[4:12]}T{fid[13:19]}_{cid}*.json'))) > 0:
+        return link
+    else:
+        return 'Coming soon'
 
 
 def main(input_args=None):
@@ -182,6 +191,7 @@ def main(input_args=None):
     parser.add_argument('--data_version', type=str, default=None)
     parser.add_argument('--visions_delivery', type=int, choices=[0,1,2],default=0)
     parser.add_argument('--n_cores', type=int, default=1)
+    parser.add_argument('--overwrite', action='store_true')
     parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')    
     args = parser.parse_args(input_args)
@@ -204,6 +214,42 @@ def main(input_args=None):
 
     ray.init(num_cpus=args.n_cores)
 
+
+    extra_metadata = {}
+    if args.software_version:
+        extra_metadata['software_build_version'] = args.software_version
+    else:
+        cmd = ["git", "symbolic-ref", "-q", "--short", "HEAD", "||", "git", "describe", "--tags", "--exact-match"]
+        output = subprocess.run(" ".join(cmd), shell=True, capture_output=True)
+        if output.returncode != 0:
+            raise RuntimeError(output.stderr.decode("utf-8"))
+        extra_metadata['software_build_version'] = output.stdout.decode("utf-8").replace("\n", "")
+
+    if args.data_version:
+        extra_metadata['product_version'] = args.data_version
+    extra_metadata['keywords'] = "Imaging Spectroscopy, minerals, EMIT, dust, radiative forcing"
+    extra_metadata['sensor'] = "EMIT (Earth Surface Mineral Dust Source Investigation)"
+    extra_metadata['instrument'] = "EMIT"
+    extra_metadata['platform'] = "ISS"
+    extra_metadata['Conventions'] = "CF-1.63"
+    extra_metadata['institution'] = "NASA Jet Propulsion Laboratory/California Institute of Technology"
+    extra_metadata['license'] = "https://science.nasa.gov/earth-science/earth-science-data/data-information-policy/"
+    extra_metadata['naming_authority'] = "LPDAAC"
+    extra_metadata['date_created'] = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    extra_metadata['keywords_vocabulary'] = "NASA Global Change Master Directory (GCMD) Science Keywords"
+    extra_metadata['stdname_vocabulary'] = "NetCDF Climate and Forecast (CF) Metadata Convention"
+    extra_metadata['creator_name'] = "Jet Propulsion Laboratory/California Institute of Technology"
+    extra_metadata['creator_url'] = "https://earth.jpl.nasa.gov/emit/"
+    extra_metadata['project'] = "Earth Surface Mineral Dust Source Investigation"
+    extra_metadata['project_url'] = "https://earth.jpl.nasa.gov/emit/"
+    extra_metadata['publisher_name'] = "NASA LPDAAC"
+    extra_metadata['publisher_url'] = "https://lpdaac.usgs.gov"
+    extra_metadata['publisher_email'] = "lpdaac@usgs.gov"
+    extra_metadata['identifier_product_doi_authority'] = "https://doi.org"
+    extra_metadata['title'] = "EMIT"
+    extra_metadata['Units']= 'ppm m'
+
+
     if args.visions_delivery != 2:
         jobs = []
         for _feat, feat in enumerate(all_plume_meta['features']):
@@ -211,48 +257,14 @@ def main(input_args=None):
                 continue
             logging.info(f'Processing plume {_feat+1}/{len(all_plume_meta["features"])}')
 
-            extra_metadata = {}
-            if args.software_version:
-                extra_metadata['software_build_version'] = args.software_version
-            else:
-                cmd = ["git", "symbolic-ref", "-q", "--short", "HEAD", "||", "git", "describe", "--tags", "--exact-match"]
-                output = subprocess.run(" ".join(cmd), shell=True, capture_output=True)
-                if output.returncode != 0:
-                    raise RuntimeError(output.stderr.decode("utf-8"))
-                extra_metadata['software_build_version'] = output.stdout.decode("utf-8").replace("\n", "")
-
-            if args.data_version:
-                extra_metadata['product_version'] = args.data_version
-            extra_metadata['keywords'] = "Imaging Spectroscopy, minerals, EMIT, dust, radiative forcing"
-            extra_metadata['sensor'] = "EMIT (Earth Surface Mineral Dust Source Investigation)"
-            extra_metadata['instrument'] = "EMIT"
-            extra_metadata['platform'] = "ISS"
-            extra_metadata['Conventions'] = "CF-1.63"
-            extra_metadata['institution'] = "NASA Jet Propulsion Laboratory/California Institute of Technology"
-            extra_metadata['license'] = "https://science.nasa.gov/earth-science/earth-science-data/data-information-policy/"
-            extra_metadata['naming_authority'] = "LPDAAC"
-            extra_metadata['date_created'] = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
-            extra_metadata['keywords_vocabulary'] = "NASA Global Change Master Directory (GCMD) Science Keywords"
-            extra_metadata['stdname_vocabulary'] = "NetCDF Climate and Forecast (CF) Metadata Convention"
-            extra_metadata['creator_name'] = "Jet Propulsion Laboratory/California Institute of Technology"
-            extra_metadata['creator_url'] = "https://earth.jpl.nasa.gov/emit/"
-            extra_metadata['project'] = "Earth Surface Mineral Dust Source Investigation"
-            extra_metadata['project_url'] = "https://earth.jpl.nasa.gov/emit/"
-            extra_metadata['publisher_name'] = "NASA LPDAAC"
-            extra_metadata['publisher_url'] = "https://lpdaac.usgs.gov"
-            extra_metadata['publisher_email'] = "lpdaac@usgs.gov"
-            extra_metadata['identifier_product_doi_authority'] = "https://doi.org"
-            extra_metadata['title'] = "EMIT"
-
-            extra_metadata['Orbit']= feat['properties']['Orbit'],
-            extra_metadata['dcid']= feat['properties']['DCID'],
-            extra_metadata['Units']= 'ppm m',
 
             if feat['geometry']['type'] == 'Polygon':
                 outdir=os.path.join(args.dest_dir, feat['properties']['Scene FIDs'][0][4:12], 'l2bch4plm')
                 if os.path.isdir(outdir) is False:
                     subprocess.call(f'mkdir -p {outdir}',shell=True)
-                jobs.append(single_plume_proc.remote(all_plume_meta, _feat, os.path.join(outdir, feat['properties']['Scene FIDs'][0] + '_' + feat['properties']['Plume ID']), args.manual_del_dir, args.source_dir, extra_metadata))
+                output_base = os.path.join(outdir, feat['properties']['Scene FIDs'][0] + '_' + feat['properties']['Plume ID'])
+                if args.overwrite or os.path.isfile(output_base) is False:
+                    jobs.append(single_plume_proc.remote(all_plume_meta, _feat, output_base, args.manual_del_dir, args.source_dir, extra_metadata))
 
         rreturn = [ray.get(jid) for jid in jobs]
 
@@ -262,7 +274,9 @@ def main(input_args=None):
             outdir = os.path.join(args.dest_dir, fid[4:12], 'l2bch4enh')
             if os.path.isdir(outdir) is False:
                 subprocess.call(f'mkdir -p {outdir}',shell=True)
-            jobs.append(single_scene_proc.remote(os.path.join(args.source_dir, fid[4:12], fid + '_ch4_mf_ort'),  os.path.join(outdir, fid + 'ch4_enh.tif'), extra_metadata))
+            of = os.path.join(outdir, fid + 'ch4_enh.tif')
+            if args.overwrite or os.path.isfile(of) is False:
+                jobs.append(single_scene_proc.remote(os.path.join(args.source_dir, fid[4:12], fid + '_ch4_mf_ort'),  of, extra_metadata))
         rreturn = [ray.get(jid) for jid in jobs]
 
 
@@ -281,12 +295,14 @@ def main(input_args=None):
             pc = newfeat['properties']['Plume ID']
             if newfeat['geometry']['type'] == 'Polygon':
                 newfeat['properties']['plume_complex_count'] = plume_count
+                newfeat['properties']['Data Download'] = get_daac_link(newfeat['properties'], extra_metadata['product_version'], args.dest_dir)
                 outdict['features'].append(newfeat)
 
                 for npi in valid_point_idx:
                     pointfeat = all_plume_meta['features'][npi].copy()
                     if pointfeat['properties']['Plume ID'] == newfeat['properties']['Plume ID']:
                         pointfeat['properties']['plume_complex_count'] = plume_count
+                        pointfeat['properties']['Data Download'] = newfeat['properties']['Data Download']
                         pointfeat['properties']['style'] = {'color': 'red','fillOpacity':0,'maxZoom':9,'minZoom':0,'opacity':1,'radius':10,'weight':2}
                         outdict['features'].append(pointfeat)
                         break
