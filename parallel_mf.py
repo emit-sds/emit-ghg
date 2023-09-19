@@ -30,6 +30,7 @@ import numpy as np
 from utils import envi_header, write_bil_chunk
 import json
 from utils import SerialEncoder
+import pdb
 
 import logging
 import os
@@ -355,14 +356,27 @@ def get_mc_subset(mc_iteration: int, args, good_pixel_idx: np.array):
     return cov_subset
 
 
+<<<<<<< HEAD
 def calculate_saturation_mask(bandmask_file: str, dilation_iterations=10, chunk_edges=None):
     if chunk_edges is None:
         l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[:,:,:]
     else:
         l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[chunk_edges[0]:chunk_edges[1],:,:]
+=======
+def calculate_saturation_mask(bandmask_file: str, radiance: np.array, dilation_iterations=10):
+    '''l1b_bandmask marks static bad pixels and saturated pixels. The minimum subtraction below
+    removes the contributions from static bad pixels, except in instances when the radiance
+    has been otherwise flagged with bad values (-9999). The bad9999 mask identifies these and
+    excludes them.'''
+    bad9999 = np.any(radiance < -1, axis = 1)
+    l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[:,:,:]
+>>>>>>> remotes/origin/dev
     l1b_bandmask_unpacked = np.unpackbits(l1b_bandmask_loaded, axis= -1)
     l1b_bandmask_summed = np.sum(l1b_bandmask_unpacked, axis = -1)
-    saturation_mask = l1b_bandmask_summed - np.min(l1b_bandmask_summed, axis = 0)
+    max_vals = np.max(l1b_bandmask_summed, axis = 0)
+    min_vals = np.min( np.where(bad9999, max_vals, l1b_bandmask_summed), axis = 0)
+    saturation_mask = l1b_bandmask_summed - min_vals
+    saturation_mask[bad9999] = 0
     dilated_saturation_mask = scipy.ndimage.binary_dilation(saturation_mask != 0, iterations = dilation_iterations) < 1
     return np.logical_not(dilated_saturation_mask), saturation_mask != 0
 
