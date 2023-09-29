@@ -140,9 +140,20 @@ def main(input_args=None):
         chunk_edges = np.arange(0, output_shape[0], args.chunksize).tolist()
         chunk_edges.append(output_shape[0])
 
+    rayargs = {'_temp_dir': args.ray_temp_dir, 'ignore_reinit_error': True, 'include_dashboard': False}
+    rayargs['num_cpus'] = args.num_cores
+    if args.num_cores == -1:
+        import multiprocessing
+        rayargs['num_cpus'] = multiprocessing.cpu_count() - 1
+    ray.init(**rayargs)
+    rdn_id = None
+    absorption_coefficients_id = ray.put(absorption_coefficients)
+    del absorption_coefficients
     for _ce, ce in enumerate(chunk_edges[:-1]):
         
-        logging.info(f"load radiance for chunk {_ce +1} / {len(chunk_edges) - 1}}")
+        if rdn_id is not None:
+            del rdn_id; rdn_id = None
+        logging.info(f"load radiance for chunk {_ce +1} / {len(chunk_edges) - 1}")
         radiance = ds.open_memmap(interleave='bil',writeable=False)[ce:chunk_edges[_ce+1],...].copy()
         chunk_shape = (chunk_edges[_ce+1] - ce, output_shape[1], output_shape[2])
 
@@ -155,7 +166,7 @@ def main(input_args=None):
             good_pixel_mask[dilated_saturation] = False
 
         logging.debug("adding flare mask")
-        dilated_flare_mask, flare_mask = calculate_flare_mask(radiance, good_pixel_mask, wavelengths, chunk_edges=[ce,chunk_edges[_ce+1]])
+        dilated_flare_mask, flare_mask = calculate_flare_mask(radiance, good_pixel_mask, wavelengths)
         good_pixel_mask[dilated_flare_mask] = False
 
         if args.flare_outfile is not None:
@@ -169,15 +180,9 @@ def main(input_args=None):
             good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
 
         logging.info('initializing ray, adding data to shared memory')
-        rayargs = {'_temp_dir': args.ray_temp_dir, 'ignore_reinit_error': True, 'include_dashboard': False}
-        rayargs['num_cpus'] = args.num_cores
-        if args.num_cores == -1:
-            import multiprocessing
-            rayargs['num_cpus'] = multiprocessing.cpu_count() - 1
-        ray.init(**rayargs)
+
         rdn_id = ray.put(radiance)
-        absorption_coefficients_id = ray.put(absorption_coefficients)
-        del radiance, absorption_coefficients
+        del radiance 
 
 
         logging.info('Run jobs')
@@ -378,12 +383,9 @@ def calculate_saturation_mask(bandmask_file: str, radiance: np.array, dilation_i
     return np.logical_not(dilated_saturation_mask), saturation_mask != 0
 
 
-def calculate_flare_mask(radiance: np.array, preflagged_pixels: np.array, wavelengths: np.array, chunk_edges=None):
+def calculate_flare_mask(radiance: np.array, preflagged_pixels: np.array, wavelengths: np.array):
     b270_idx = np.argmin(np.abs(wavelengths - 2389.486)) 
-    if chunk_edges is None:
-        hot_mask = np.where(np.logical_and(radiance[:,b270_idx,:] > 1.5, preflagged_pixels == True), 1., 0.)
-    else:
-        hot_mask = np.where(np.logical_and(radiance[chunk_edges[0]:chunk_edges[1],b270_idx,:] > 1.5, preflagged_pixels == True), 1., 0.)
+    hot_mask = np.where(np.logical_and(radiance[:,b270_idx,:] > 1.5, preflagged_pixels == True), 1., 0.)
     hot_mask_dilated = scipy.ndimage.uniform_filter(hot_mask, [5,5]) > 0.01
     return hot_mask_dilated, hot_mask
 
