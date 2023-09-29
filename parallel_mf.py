@@ -356,21 +356,18 @@ def get_mc_subset(mc_iteration: int, args, good_pixel_idx: np.array):
     return cov_subset
 
 
-<<<<<<< HEAD
-def calculate_saturation_mask(bandmask_file: str, dilation_iterations=10, chunk_edges=None):
-    if chunk_edges is None:
-        l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[:,:,:]
-    else:
-        l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[chunk_edges[0]:chunk_edges[1],:,:]
-=======
-def calculate_saturation_mask(bandmask_file: str, radiance: np.array, dilation_iterations=10):
+def calculate_saturation_mask(bandmask_file: str, radiance: np.array, dilation_iterations=10, chunk_edges=None):
     '''l1b_bandmask marks static bad pixels and saturated pixels. The minimum subtraction below
     removes the contributions from static bad pixels, except in instances when the radiance
     has been otherwise flagged with bad values (-9999). The bad9999 mask identifies these and
     excludes them.'''
+
+    if chunk_edges is None:
+        l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[:,:,:]
+    else:
+        l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[chunk_edges[0]:chunk_edges[1],:,:]
+
     bad9999 = np.any(radiance < -1, axis = 1)
-    l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[:,:,:]
->>>>>>> remotes/origin/dev
     l1b_bandmask_unpacked = np.unpackbits(l1b_bandmask_loaded, axis= -1)
     l1b_bandmask_summed = np.sum(l1b_bandmask_unpacked, axis = -1)
     max_vals = np.max(l1b_bandmask_summed, axis = 0)
