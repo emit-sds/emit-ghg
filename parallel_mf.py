@@ -30,6 +30,8 @@ import numpy as np
 from utils import envi_header, write_bil_chunk
 import json
 from utils import SerialEncoder
+import glob
+import pdb
 
 import logging
 import os
@@ -115,15 +117,52 @@ def main(input_args=None):
     absorption_coefficients = library_reference[active_wl_idx,2]
  
     logging.info("load radiance")
-    radiance = ds.open_memmap(interleave='bil',writeable=False).copy()
+    #radiance = ds.open_memmap(interleave='bil',writeable=False).copy()
+
+    day_path = '/'.join(args.radiance_file.split('/')[:-3])
+    scene_path = '/'.join(args.radiance_file.split('/')[:-2])
+    all_cases_in_one_day = glob.glob(day_path + '/*')
+    all_cases_in_one_day.sort()
+    case_index = all_cases_in_one_day.index(scene_path)
+    #if case_index == 0:
+    #    case_index = 1
+    #elif case_index == len(all_cases_in_one_day) - 1:
+    #    case_index = len(all_cases_in_one_day) - 2
+    #else:
+    #    #case_index = case_index + 1
+    #    case_index = case_index - 1
+    
+    n_files_to_combine = 5
+    radiance_filenames = []
+    radiance_list = []
+    for i in np.arange(case_index-n_files_to_combine//2, case_index+n_files_to_combine//2+1):
+        f = glob.glob(f'{all_cases_in_one_day[i]}/l1b/*rdn*img')
+        if len(f) != 1:
+            raise IOError(f'Cannot find rdn file at {f}')
+        f = f[0]
+        radiance_filenames.append(f)
+        f_hdr = f.split('.')[0] + '.hdr'
+        ds_temp = envi.open(envi_header(f_hdr),image=f)
+        radiance_list.append(ds_temp.open_memmap(interleave='bil',writeable=False).copy())
+    radiance = np.concatenate(radiance_list, axis = 0)
+    radiance_list = []
+
+    print(f'{radiance_filenames}')
 
     logging.info("load masks")
     good_pixel_mask = np.ones((radiance.shape[0],radiance.shape[2]),dtype=bool)
-    saturation = None
-    if args.l1b_bandmask_file is not None:
+    saturation = []
+    dilated_saturation = []
+    for radiance_filename in radiance_filenames:
+        l1b_bandmask_file = radiance_filename.replace('rdn', 'bandmask')
         logging.debug("loading pixel mask")
-        dilated_saturation, saturation = calculate_saturation_mask(args.l1b_bandmask_file)
-        good_pixel_mask[dilated_saturation] = False
+        dilated_saturation_local, saturation_local = calculate_saturation_mask(args.l1b_bandmask_file)
+        dilated_saturation.append(dilated_saturation_local)
+        saturation.append(saturation_local)
+    dilated_saturation = np.concatenate(dilated_saturation, axis = 0)
+    saturation = np.concatenate(saturation, axis = 0)
+
+    good_pixel_mask[dilated_saturation] = False
 
     logging.debug("adding flare mask")
     dilated_flare_mask, flare_mask = calculate_flare_mask(radiance, good_pixel_mask, wavelengths)
@@ -134,10 +173,26 @@ def main(input_args=None):
         write_hotspot_vector(args.flare_outfile, flare_mask, saturation)
 
     logging.debug("adding cloud / water mask")
-    clouds_and_surface_water_mask = None
-    if args.l2a_mask_file is not None:
-        clouds_and_surface_water_mask = np.sum(envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')[...,:3],axis=-1) > 0
-        good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
+    clouds_and_surface_water_mask = []
+    for radiance_filename in radiance_filenames:
+        l2a_mask_file = radiance_filename.replace('l1b','l2a').replace('rdn', 'mask')
+        clouds_and_surface_water_mask.append(np.sum(envi.open(envi_header(l2a_mask_file)).open_memmap(interleave='bip')[...,:3],axis=-1) > 0)
+    clouds_and_surface_water_mask = np.concatenate(clouds_and_surface_water_mask, axis = 0)
+    good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
+
+    radiance = scipy.ndimage.uniform_filter(radiance, [n_files_to_combine, 1, 1])
+    good_pixel_mask = scipy.ndimage.uniform_filter(good_pixel_mask, [n_files_to_combine, 1]) > 0
+    clouds_and_surface_water_mask = scipy.ndimage.uniform_filter(clouds_and_surface_water_mask, [n_files_to_combine, 1]) > 0
+    saturation = scipy.ndimage.uniform_filter(saturation, [n_files_to_combine, 1]) > 0
+    dilated_saturation = scipy.ndimage.uniform_filter(dilated_saturation, [n_files_to_combine, 1]) > 0
+    dilated_flare_mask = scipy.ndimage.uniform_filter(dilated_flare_mask, [n_files_to_combine, 1]) > 0
+
+    radiance = np.ascontiguousarray(radiance[::5, :, :])
+    good_pixel_mask = np.ascontiguousarray(good_pixel_mask[::5,:])
+    clouds_and_surface_water_mask = np.ascontiguousarray(clouds_and_surface_water_mask[::5,:])
+    saturation = np.ascontiguousarray(saturation[::5,:])
+    dilated_saturation = np.ascontiguousarray(dilated_saturation[::5,:])
+    dilated_flare_mask = np.ascontiguousarray(dilated_flare_mask[::5,:])
 
     logging.info('initializing ray, adding data to shared memory')
     rayargs = {'_temp_dir': args.ray_temp_dir, 'ignore_reinit_error': True, 'include_dashboard': False}
