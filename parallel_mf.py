@@ -156,7 +156,7 @@ def main(input_args=None):
     for radiance_filename in radiance_filenames:
         l1b_bandmask_file = radiance_filename.replace('rdn', 'bandmask')
         logging.debug("loading pixel mask")
-        dilated_saturation_local, saturation_local = calculate_saturation_mask(args.l1b_bandmask_file)
+        dilated_saturation_local, saturation_local = calculate_saturation_mask(l1b_bandmask_file)
         dilated_saturation.append(dilated_saturation_local)
         saturation.append(saturation_local)
     dilated_saturation = np.concatenate(dilated_saturation, axis = 0)
@@ -181,18 +181,32 @@ def main(input_args=None):
     good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
 
     radiance = scipy.ndimage.uniform_filter(radiance, [n_files_to_combine, 1, 1])
-    good_pixel_mask = scipy.ndimage.uniform_filter(good_pixel_mask, [n_files_to_combine, 1]) > 0
-    clouds_and_surface_water_mask = scipy.ndimage.uniform_filter(clouds_and_surface_water_mask, [n_files_to_combine, 1]) > 0
-    saturation = scipy.ndimage.uniform_filter(saturation, [n_files_to_combine, 1]) > 0
-    dilated_saturation = scipy.ndimage.uniform_filter(dilated_saturation, [n_files_to_combine, 1]) > 0
-    dilated_flare_mask = scipy.ndimage.uniform_filter(dilated_flare_mask, [n_files_to_combine, 1]) > 0
+    radiance = np.ascontiguousarray(radiance[::n_files_to_combine, :, :])
 
-    radiance = np.ascontiguousarray(radiance[::5, :, :])
-    good_pixel_mask = np.ascontiguousarray(good_pixel_mask[::5,:])
-    clouds_and_surface_water_mask = np.ascontiguousarray(clouds_and_surface_water_mask[::5,:])
-    saturation = np.ascontiguousarray(saturation[::5,:])
-    dilated_saturation = np.ascontiguousarray(dilated_saturation[::5,:])
-    dilated_flare_mask = np.ascontiguousarray(dilated_flare_mask[::5,:])
+    smoothed_flag_mask_threshold = (n_files_to_combine - 1) / n_files_to_combine
+    def smooth_and_downsample_mask(m, threshold):
+        tmp = scipy.ndimage.uniform_filter(m.astype(float), [n_files_to_combine, 1]) > threshold
+        return np.ascontiguousarray(tmp[::5,:])
+    
+    good_pixel_mask =               smooth_and_downsample_mask(good_pixel_mask, smoothed_flag_mask_threshold)
+    clouds_and_surface_water_mask = smooth_and_downsample_mask(clouds_and_surface_water_mask, smoothed_flag_mask_threshold)
+    saturation =                    smooth_and_downsample_mask(saturation, smoothed_flag_mask_threshold)
+    dilated_saturation =            smooth_and_downsample_mask(dilated_saturation, smoothed_flag_mask_threshold)
+    dilated_flare_mask =            smooth_and_downsample_mask(dilated_flare_mask, smoothed_flag_mask_threshold)
+    np.save('/beegfs/scratch/jfahlen/test_combine_and_coadd/gpm.npy', good_pixel_mask)
+
+
+    #good_pixel_mask = scipy.ndimage.uniform_filter(good_pixel_mask.astype(float), [n_files_to_combine, 1]) > smoothed_flag_mask_threshold
+    #clouds_and_surface_water_mask = scipy.ndimage.uniform_filter(clouds_and_surface_water_mask.astype(float), [n_files_to_combine, 1]) > smoothed_flag_mask_threshold
+    #saturation = scipy.ndimage.uniform_filter(saturation.astype(float), [n_files_to_combine, 1]) > smoothed_flag_mask_threshold
+    #dilated_saturation = scipy.ndimage.uniform_filter(dilated_saturation.astype(float), [n_files_to_combine, 1]) > smoothed_flag_mask_threshold
+    #dilated_flare_mask = scipy.ndimage.uniform_filter(dilated_flare_mask.astype(float), [n_files_to_combine, 1]) > smoothed_flag_mask_threshold
+
+    #good_pixel_mask = np.ascontiguousarray(good_pixel_mask[::n_files_to_combine,:])
+    #clouds_and_surface_water_mask = np.ascontiguousarray(clouds_and_surface_water_mask[::n_files_to_combine,:])
+    #saturation = np.ascontiguousarray(saturation[::n_files_to_combine,:])
+    #dilated_saturation = np.ascontiguousarray(dilated_saturation[::n_files_to_combine,:])
+    #dilated_flare_mask = np.ascontiguousarray(dilated_flare_mask[::n_files_to_combine,:])
 
     logging.info('initializing ray, adding data to shared memory')
     rayargs = {'_temp_dir': args.ray_temp_dir, 'ignore_reinit_error': True, 'include_dashboard': False}
