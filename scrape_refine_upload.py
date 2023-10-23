@@ -175,19 +175,24 @@ def add_fids(manual_annotations, coverage, manual_annotations_previous):
 def add_orbits(annotations, indices_to_update, database):
 
     ind_to_pop = []
-    for ind in indices_to_update:
+    update_ind_to_pop = []
+    for _ind, ind in enumerate(indices_to_update):
         db_ret = [database.find_acquisition_by_id(fid) for fid in annotations['features'][ind]['properties']['fids']]
         orbits = [db_ret[_fid]['orbit'] for _fid, fid in enumerate(annotations['features'][ind]['properties']['fids'])]
         dcids  = [db_ret[_fid]['associated_dcid']  for _fid, fid in enumerate(annotations['features'][ind]['properties']['fids'])]
-        scene_numbers  = [db_ret[_fid]['daac_scene']  for _fid, fid in enumerate(annotations['features'][ind]['properties']['fids'])]
+
+        scene_numbers  = [db_ret[_fid]['daac_scene'] if 'daac_scene' in db_ret[_fid].keys() else None for _fid, fid in enumerate(annotations['features'][ind]['properties']['fids']) ]
+
         un_orbits = np.unique(orbits)
         un_dcids = np.unique(dcids)
 
-        if len(db_ret) == 0:
-            logging.info(f'No FIDs at {annotations["features"][ind]["properties"]["Plume ID"]}...skipping')
-            import ipdb; ipdb.set_trace()
+        if len(db_ret) == 0 or None in scene_numbers:
+            logging.info(f'No FIDs or DAAC Scenes at {annotations["features"][ind]["properties"]["Plume ID"]}...skipping')
+            #import ipdb; ipdb.set_trace()
             annotations['features'][ind]['properties']['orbit'] = []
             ind_to_pop.append(ind)
+            update_ind_to_pop.append(_ind)
+
             continue
         if len(un_dcids) > 1:
             logging.error('Ack - entry {annotations["features"][ind]} spans two dcids')
@@ -196,9 +201,17 @@ def add_orbits(annotations, indices_to_update, database):
         annotations['features'][ind]['properties']['dcid'] = un_dcids[0]
         annotations['features'][ind]['properties']['daac_scenes'] = scene_numbers
     
-    #for _ind in range(len(ind_to_pop)-1,-1,-1):
-    #    annotations['features'].pop(_ind)
-    return annotations
+    for ind in np.array(ind_to_pop)[::-1]:
+        annotations['features'].pop(ind)
+
+    indices_to_update = np.array(indices_to_update)
+    for _ind in np.array(update_ind_to_pop)[::-1]:
+        indices_to_update[_ind:] -= 1
+    indices_to_update = indices_to_update.tolist()
+
+    for _ind in np.array(update_ind_to_pop)[::-1]:
+        indices_to_update.pop(_ind)
+    return annotations, indices_to_update
 
 def write_color_plume(rawdat, plumes_mask, glt_ds, outname: str, style = 'ch4'):
 
@@ -350,15 +363,15 @@ def main(input_args=None):
             continue
 
         # Otherwise get the orbit of each new plume
-        manual_annotations             = add_orbits(manual_annotations, new_plumes, database)
-
-        # Dump out the udpated manual annotations set, so it holds FIDs / orbits for next round
-        with open(annotation_file, 'w') as fout:
-            fout.write(json.dumps(manual_annotations, cls=SerialEncoder)) 
+        manual_annotations, new_plumes     = add_orbits(manual_annotations, new_plumes, database)
 
         unique_fids = np.unique([sublist for x in new_plumes for sublist in manual_annotations['features'][x]['properties']['fids']])
         unique_orbits = np.unique([manual_annotations['features'][x]['properties']['orbit'] for x in new_plumes]).tolist()
         unique_dcids = np.unique([manual_annotations['features'][x]['properties']['dcid'] for x in new_plumes]).tolist()
+
+        # Dump out the udpated manual annotations set, so it holds FIDs / orbits for next round
+        with open(annotation_file, 'w') as fout:
+            fout.write(json.dumps(manual_annotations, cls=SerialEncoder)) 
 
         for feat in manual_annotations['features']:
             if 'dcid' not in feat['properties'].keys():

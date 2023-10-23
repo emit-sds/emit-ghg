@@ -58,7 +58,7 @@ def main(input_args=None):
 
       launch = os.path.isfile(ch4_mf_kmz_file) is False
       if os.path.isfile(ch4_mf_kmz_file) is False or (args.co2 and os.path.isfile(co2_mf_kmz_file) is False):
-        cmd_str=f'sbatch -N 1 -c 40 -p standard --mem=180G --wrap="python ghg_process.py {rdn_files[_r]} {obs_files[_r]} {loc_files[_r]} {glt_files[_r]} {l1b_bandmask_files[_r]} {l2a_mask_files[_r]} {out_files[_r]}'
+        cmd_str=f'sbatch -N 1 -c 40 -p standard --mem=180G --wrap="source /tmp/miniconda/bin/activate; conda activate isofit_env; python ghg_process.py {rdn_files[_r]} {obs_files[_r]} {loc_files[_r]} {glt_files[_r]} {l1b_bandmask_files[_r]} {l2a_mask_files[_r]} {out_files[_r]}'
 
         if args.co2:
             cmd_str += ' --co2'
