@@ -19,6 +19,47 @@ from osgeo import gdal
 from emit_main.workflow.workflow_manager import WorkflowManager
 
 
+def envi_header(inputpath):
+    """
+    Convert a envi binary/header path to a header, handling extensions
+    Args:
+        inputpath: path to envi binary file
+    Returns:
+        str: the header file associated with the input reference.
+
+    """
+    if os.path.splitext(inputpath)[-1] == '.img' or os.path.splitext(inputpath)[-1] == '.dat' or os.path.splitext(inputpath)[-1] == '.raw':
+        # headers could be at either filename.img.hdr or filename.hdr.  Check both, return the one that exists if it
+        # does, if not return the latter (new file creation presumed).
+        hdrfile = os.path.splitext(inputpath)[0] + '.hdr'
+        if os.path.isfile(hdrfile):
+            return hdrfile
+        elif os.path.isfile(inputpath + '.hdr'):
+            return inputpath + '.hdr'
+        return hdrfile
+    elif os.path.splitext(inputpath)[-1] == '.hdr':
+        return inputpath
+    else:
+        return inputpath + '.hdr'
+
+
+def get_band_mean(input_file: str, band) -> float:
+    """
+    Determines the mean of a band
+    Args:
+        input_file (str): obs file (EMIT style)
+        band (int, optional): Band number retrieve average from.
+    Returns:
+        float: mean value of given band
+    """
+    ds = envi.open(envi_header(input_file))
+    target = ds.open_memmap(interleave='bip')[..., band]
+
+    good = target > -9990
+
+    return np.mean(target[good])
+
+
 def initialize_ummg(granule_name: str, creation_time: datetime, collection_name: str, collection_version: str,
                     start_time: datetime, stop_time: datetime, pge_name: str, pge_version: str,
                     sds_software_build_version: str = None, ghg_software_build_version: str = None,
@@ -329,6 +370,10 @@ def deliver_ch4enh(base_dir, fname, wm, ghg_config):
     meta = ds.GetMetadata()
     ghg_software_build_version = meta["software_build_version"]
 
+    # Get mean solar azimuth and zenith
+    mean_solar_azimuth = get_band_mean(acq.obs_img_path, 3)
+    mean_solar_zenith = get_band_mean(acq.obs_img_path, 4)
+
     # Create the UMM-G file
     print(f"Creating ummg file at {local_ummg_path}")
     tif_creation_time = datetime.datetime.fromtimestamp(os.path.getmtime(local_enh_path), tz=datetime.timezone.utc)
@@ -339,8 +384,8 @@ def deliver_ch4enh(base_dir, fname, wm, ghg_config):
                            ghg_software_build_version=ghg_software_build_version,
                            ghg_software_delivery_version=ghg_config["repo_version"],
                            doi=ghg_config["dois"]["EMITL2BCH4ENH"], orbit=int(acq.orbit), orbit_segment=int(acq.scene),
-                           scene=int(acq.daac_scene), solar_zenith=acq.mean_solar_zenith,
-                           solar_azimuth=acq.mean_solar_azimuth, cloud_fraction=acq.cloud_fraction)
+                           scene=int(acq.daac_scene), solar_zenith=mean_solar_zenith,
+                           solar_azimuth=mean_solar_azimuth, cloud_fraction=acq.cloud_fraction)
     ummg = add_data_files_ummg(ummg, files[:2], daynight, ["TIFF", "PNG"])
 
     ummg = add_boundary_ummg(ummg, acq.gring)
@@ -404,13 +449,12 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
         else:
             acq_id = f"emit{scene.split('_')[4].replace('T', 't')}"
         tmp_acq = WorkflowManager(wm.config_path, acquisition_id=acq_id).acquisition
-        total_solar_zenith += tmp_acq.mean_solar_zenith
-        total_solar_azimuth += tmp_acq.mean_solar_azimuth
+        total_solar_azimuth += get_band_mean(tmp_acq.obs_img_path, 3)
+        total_solar_zenith += get_band_mean(tmp_acq.obs_img_path, 4)
         total_cloud_fraction += tmp_acq.cloud_fraction
     mean_solar_zenith = total_solar_zenith / len(source_scenes)
     mean_solar_azimuth = total_solar_azimuth / len(source_scenes)
     mean_cloud_fraction = total_cloud_fraction / len(source_scenes)
-
 
     # Create the UMM-G file
     print(f"Creating ummg file at {local_ummg_path}")
