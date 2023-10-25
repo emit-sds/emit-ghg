@@ -446,10 +446,9 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
 
         mf = ((loc_rdn[no_radiance_mask,:] - mu).dot(Cinv).dot(target.T)) / normalizer
 
-
         a_times_X = -1 * absorption_coefficients.copy() * loc_rdn[no_radiance_mask, :]
-        aX_Cinv_s = ((a_times_X).dot(Cinv).dot(target.T))
-        uncert = np.sqrt(normalizer) / np.abs(aX_Cinv_s) # Std. dev. of concentration length
+        MF_slope = ((a_times_X).dot(Cinv).dot(target.T))
+        uncert = np.sqrt(normalizer) / np.abs(MF_slope) # Std. dev. of concentration length
         
         # scale outputs
         mf_mc[no_radiance_mask,_mc] = mf * args.ppm_scaling
