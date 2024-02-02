@@ -70,6 +70,7 @@ def main(input_args=None):
     parser.add_argument('--flare_outfile', type=str, default=None, help='output geojson to write flare location centers')         
     parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')         
+    parser.add_argument('--noise_parameters_file', type=str, default=None, help='Mandatory input to produce uncertainty metric. EMIT file found here: https://github.com/isofit/isofit/blob/dev/data/emit_noise.txt')         
     args = parser.parse_args(input_args)
 
     #Set up logging
@@ -111,6 +112,12 @@ def main(input_args=None):
 
     logging.info(f'Active wavelength range: {args.wavelength_range}: {len(active_wl_idx)} channels')
 
+    logging.info("load noise model")
+    if args.noise_parameters_file is not None:
+        noise_model_parameters = noise_model_init(args.noise_parameters_file, wavelengths)[active_wl_idx, :]
+    else:
+        noise_model_parameters = None
+
     logging.info("load target library")
     library_reference = np.float64(np.loadtxt(args.library))
     absorption_coefficients = library_reference[active_wl_idx,2]
@@ -149,7 +156,8 @@ def main(input_args=None):
     ray.init(**rayargs)
     rdn_id = ray.put(radiance)
     absorption_coefficients_id = ray.put(absorption_coefficients)
-    del radiance, absorption_coefficients
+    noise_model_parameters_id = ray.put(noise_model_parameters)
+    del radiance, absorption_coefficients, noise_model_parameters
 
     logging.info('Create output file, initialized with nodata')
     outmeta = ds.metadata
@@ -172,7 +180,7 @@ def main(input_args=None):
     write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.uncert_output_file, 0, output_shape)
 
     logging.info('Run jobs')
-    jobs = [mf_one_column.remote(col, rdn_id, absorption_coefficients_id, active_wl_idx, good_pixel_mask, args) for col in range(output_shape[2])]
+    jobs = [mf_one_column.remote(col, rdn_id, absorption_coefficients_id, active_wl_idx, good_pixel_mask, noise_model_parameters_id, args) for col in range(output_shape[2])]
     rreturn = [ray.get(jid) for jid in jobs]
 
     logging.info('Collecting and writing output')
@@ -380,9 +388,22 @@ def calculate_flare_mask(radiance: np.array, preflagged_pixels: np.array, wavele
     hot_mask_dilated = scipy.ndimage.uniform_filter(hot_mask, [5,5]) > 0.01
     return hot_mask_dilated, hot_mask
 
+def noise_model_init(noise_file, wl_nm: np.array):
+    coeffs = np.loadtxt(noise_file, delimiter=" ", comments="#")
+    p_a, p_b, p_c = [scipy.interpolate.interp1d(coeffs[:, 0], coeffs[:, col], fill_value="extrapolate") for col in (1, 2, 3)]
+    noise = np.array([[p_a(w), p_b(w), p_c(w)] for w in (wl_nm)])
+    return noise
+
+def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, radiance: np.array):
+    noise_plus_meas = noise_model_parameters[:, 1] + radiance
+    if np.any(noise_plus_meas <= 0):
+        noise_plus_meas[noise_plus_meas <= 0] = 1e-5
+        print( "Parametric noise model found noise <= 0 - adjusting to slightly" " positive to avoid /0.")
+    nedl = np.abs(noise_model_parameters[:, 0] * np.sqrt(noise_plus_meas) + noise_model_parameters[:, 2])
+    return nedl
 
 @ray.remote
-def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.array, active_wl_idx: np.array, good_pixel_mask: np.array, args):
+def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.array, active_wl_idx: np.array, good_pixel_mask: np.array, noise_model_parameters: np.array, args):
     """ Run the matched filter on a single column of the input image
 
     Args:
@@ -408,6 +429,9 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
     if len(good_pixel_idx) < 10:
         logging.debug('Too few good pixels found in col {col}: skipping')
         return None, None
+    
+    if args.noise_parameters_file is not None:
+        nedl_variance = (get_noise_equivalent_spectral_radiance(noise_model_parameters, rdn))**2
     
     # array to hold results in
     mf_mc = np.ones((rdn.shape[0],args.n_mc)) * args.nodata_value
@@ -446,20 +470,32 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
 
         mf = ((loc_rdn[no_radiance_mask,:] - mu).dot(Cinv).dot(target.T)) / normalizer
 
-        a_times_X = -1 * absorption_coefficients.copy() * loc_rdn[no_radiance_mask, :]
-        MF_slope = ((a_times_X).dot(Cinv).dot(target.T))
-        uncert = np.sqrt(normalizer) / np.abs(MF_slope) # Std. dev. of concentration length
+        if args.noise_parameters_file is not None:
+            ####################################################################################################################
+            # Uncertainty
+            # This implements (s^T Cinv Sigma Cinv s) / (s^T Cinv aX) (in linear algebra notation)
+            # Sigma is diagonal, so we just need a standard numpy mulitply, which we can also broadcast along the whole column
+            sC = target.dot(Cinv)
+            numer = (sC * nedl_variance[no_radiance_mask,:]) @ sC
+            a_times_X = -1 * absorption_coefficients.copy() * loc_rdn[no_radiance_mask, :]
+            denom = ((a_times_X).dot(Cinv).dot(target.T))**2
+            uncert = np.sqrt(numer/denom)
+            ####################################################################################################################
         
         # scale outputs
         mf_mc[no_radiance_mask,_mc] = mf * args.ppm_scaling
-        uncert_mc[no_radiance_mask,_mc] = uncert * args.ppm_scaling
+        if args.noise_parameters_file is not None:
+            uncert_mc[no_radiance_mask,_mc] = uncert * args.ppm_scaling
     
     output = np.vstack([np.mean(mf_mc,axis=-1), np.std(mf_mc,axis=-1)]).T
     output[np.logical_not(no_radiance_mask),:] = args.nodata_value
 
-    uncert = uncert_mc[:,0]
-    uncert[np.logical_not(no_radiance_mask)] = args.nodata_value
-    uncert[np.logical_not(np.isfinite(uncert))] = args.nodata_value
+    if args.noise_parameters_file is not None:
+        uncert = uncert_mc[:,0]
+        uncert[np.logical_not(no_radiance_mask)] = args.nodata_value
+        uncert[np.logical_not(np.isfinite(uncert))] = args.nodata_value
+    else:
+        uncert = np.ones(rdn.shape[0]) * args.nodata_value
 
     logging.debug(f'Column {col} mean: {np.mean(output[good_pixel_idx,0])}')
     return output.astype(np.float32), col, uncert
