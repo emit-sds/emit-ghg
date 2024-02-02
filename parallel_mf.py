@@ -48,6 +48,7 @@ def main(input_args=None):
     parser.add_argument('library', type=str,  metavar='LIBRARY', help='path to target library file')
     parser.add_argument('output_file', type=str,  metavar='OUTPUT', help='path for output image (mf ch4 ppm)')    
     parser.add_argument('uncert_output_file', type=str,  metavar='OUTPUT', help='path for uncertainty output image (mf ch4 ppm)')    
+    parser.add_argument('sens_output_file', type=str,  metavar='OUTPUT', help='path for sensitivity output image (mf ch4 ppm)')    
 
     parser.add_argument('--covariance_style', type=str, default='looshrinkage', choices=['empirical', 'looshrinkage'], help='style of covariance estimation') 
     parser.add_argument('--fixed_alpha', type=float, default=None, help='fixed value for shrinkage (with looshrinkage covariance style only)')    
@@ -175,9 +176,12 @@ def main(input_args=None):
     del output_ds
     output_ds = envi.create_image(envi_header(args.uncert_output_file),outmeta,force=True,ext='')
     del output_ds
+    output_ds = envi.create_image(envi_header(args.sens_output_file),outmeta,force=True,ext='')
+    del output_ds
     output_shape = (int(outmeta['lines']),int(outmeta['bands']),int(outmeta['samples']))
     write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.output_file, 0, output_shape)
     write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.uncert_output_file, 0, output_shape)
+    write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.sens_output_file, 0, output_shape)
 
     logging.info('Run jobs')
     jobs = [mf_one_column.remote(col, rdn_id, absorption_coefficients_id, active_wl_idx, good_pixel_mask, noise_model_parameters_id, args) for col in range(output_shape[2])]
@@ -186,10 +190,12 @@ def main(input_args=None):
     logging.info('Collecting and writing output')
     output_dat = np.zeros(output_shape,dtype=np.float32)
     output_uncert_dat = np.zeros(output_shape,dtype=np.float32)
+    output_sens_dat = np.zeros(output_shape,dtype=np.float32)
     for ret in rreturn:
         if ret[0] is not None:
             output_dat[:, 0, ret[1]] = ret[0][:,0]
             output_uncert_dat[:, 0, ret[1]] = ret[2][:]
+            output_sens_dat[:, 0, ret[1]] = ret[3][:]
     
     def apply_badvalue(d, mask, bad_data_value):
         d = d.transpose((0,2,1))
@@ -205,6 +211,7 @@ def main(input_args=None):
         #output_dat = output_dat.transpose((0,2,1))
         output_dat = apply_badvalue(output_dat, clouds_and_surface_water_mask, 0)
         output_uncert_dat = apply_badvalue(output_uncert_dat, clouds_and_surface_water_mask, 0)
+        output_sens_dat = apply_badvalue(output_sens_dat, clouds_and_surface_water_mask, 0)
 
     if args.mask_saturation and saturation is not None:
         logging.info('Masking saturation')
@@ -213,6 +220,7 @@ def main(input_args=None):
         #output_dat = output_dat.transpose((0,2,1))
         output_dat = apply_badvalue(output_dat, saturation, 0)
         output_uncert_dat = apply_badvalue(output_uncert_dat, saturation, 0)
+        output_sens_dat = apply_badvalue(output_sens_dat, saturation, 0)
 
     if args.mask_flares and saturation is not None:
         logging.info('Masking saturation')
@@ -222,11 +230,14 @@ def main(input_args=None):
         #output_dat = output_dat.transpose((0,2,1))
         output_dat = apply_badvalue(output_dat, dilated_saturation, -1)
         output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_saturation, -1)
+        output_sens_dat = apply_badvalue(output_sens_dat, dilated_saturation, -1)
         output_dat = apply_badvalue(output_dat, dilated_flare_mask, -1)
         output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_flare_mask, -1)
+        output_sens_dat = apply_badvalue(output_sens_dat, dilated_flare_mask, -1)
 
     write_bil_chunk(output_dat, args.output_file, 0, output_shape)
     write_bil_chunk(output_uncert_dat, args.uncert_output_file, 0, output_shape)
+    write_bil_chunk(output_sens_dat, args.sens_output_file, 0, output_shape)
     logging.info('Complete')
 
 
@@ -436,6 +447,7 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
     # array to hold results in
     mf_mc = np.ones((rdn.shape[0],args.n_mc)) * args.nodata_value
     uncert_mc = np.ones((rdn.shape[0],args.n_mc)) * args.nodata_value
+    sens_mc = np.ones((rdn.shape[0],args.n_mc)) * args.nodata_value
 
     np.random.seed(13)
     for _mc in range(args.n_mc):
@@ -481,6 +493,8 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
             denom = ((a_times_X).dot(Cinv).dot(target.T))**2
             uncert = np.sqrt(numer/denom)
             ####################################################################################################################
+
+            sens_mc[no_radiance_mask,_mc] = np.sqrt(denom) / normalizer
         
         # scale outputs
         mf_mc[no_radiance_mask,_mc] = mf * args.ppm_scaling
@@ -496,9 +510,13 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
         uncert[np.logical_not(np.isfinite(uncert))] = args.nodata_value
     else:
         uncert = np.ones(rdn.shape[0]) * args.nodata_value
+        
+    sens = sens_mc[:,0]
+    sens[np.logical_not(no_radiance_mask)] = args.nodata_value
+    sens[np.logical_not(np.isfinite(uncert))] = args.nodata_value
 
     logging.debug(f'Column {col} mean: {np.mean(output[good_pixel_idx,0])}')
-    return output.astype(np.float32), col, uncert
+    return output.astype(np.float32), col, uncert, sens
 
 
 if __name__ == '__main__':
