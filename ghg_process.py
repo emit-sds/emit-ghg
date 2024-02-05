@@ -158,8 +158,7 @@ def main(input_args=None):
     if os.path.isfile(ch4_mf_file) is False or args.overwrite:
         logging.info('starting parallel mf')
         subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, ch4_mf_uncert_file, ch4_mf_sens_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, \
-                   '--wavelength_range', '500', '1340', '1500', '1790', '2032', '2450', '--fixed_alpha', '0.0000000001', '--mask_clouds_water', '--mask_flares', '--flare_outfile', flare_file,
-                    '--noise_parameters_file', '/beegfs/scratch/jfahlen/emit_radiance_model/emit_noise.txt']
+                   '--wavelength_range', '500', '1340', '1500', '1790', '1950', '2450', '--fixed_alpha', '0.0000000001', '--mask_clouds_water', '--mask_flares', '--flare_outfile', flare_file]
         if args.ace_filter:
             subargs.append('--use_ace_filter')
         parallel_mf.main(subargs)
