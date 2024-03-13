@@ -310,6 +310,7 @@ def main(input_args=None):
 
         with open(os.path.join(args.dest_dir, 'combined_plume_metadata.json'), 'w') as fout:
             fout.write(json.dumps(outdict, cls=SerialEncoder)) 
+        subprocess.call("rsync visions_delivery/combined_plume_metadata.json brodrick@${EMIT_SCIENCE_IP}:/data/emit/mmgis/coverage/combined_plume_metadata.json",shell=True)
 
     
         logging.info('Tile output')
@@ -320,7 +321,7 @@ def main(input_args=None):
             subfeatures = [feat for _feat, feat in enumerate(all_plume_meta['features']) if _feat in match_idx and _feat in valid_plume_idx]
             if len(subfeatures) > 0:
                 tile_dcid(subfeatures, outdir, args.manual_del_dir)
-
+        subprocess.call("rsync -a --info=progress2 visions_delivery/visions_ch4_tiles/ brodrick@${EMIT_SCIENCE_IP}:/data/emit/mmgis/mosaics/ch4_plume_tiles/",shell=True)
     
 
 

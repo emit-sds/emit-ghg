@@ -26,6 +26,7 @@ import time
 import subprocess
 from spectral.io import envi
 from shapely.geometry import Polygon
+import shapely
 from copy import deepcopy
 from osgeo import gdal
 from apply_glt import single_image_ortho
@@ -75,8 +76,10 @@ def plume_mask_threshold(input: np.array, pm, style='ch4'):
 
 def spatial_temporal_filter(cov_df, coverage, roi, start_time, end_time):
 
-    temporal_inds = np.where(np.logical_and(cov_df['properties.start_time'] >= pd.to_datetime(start_time) , cov_df['properties.end_time'] <= pd.to_datetime(end_time) ))[0]
-    spatial_inds = np.where(cov_df['geometry.coordinates'][:][temporal_inds].apply(lambda s,roi=roi: s.intersects(roi)))[0]
+    temporal_inds = np.where(np.logical_and(cov_df['properties.start_time'] >= pd.to_datetime(start_time) , 
+                                            cov_df['properties.end_time'] <= pd.to_datetime(end_time) ))[0]
+    spatial_inds = np.where(cov_df['geometry.coordinates'][:][temporal_inds].apply(lambda s,
+                        roi=roi: s.intersects(roi)))[0]
 
     return [coverage['features'][i] for i in temporal_inds[spatial_inds]]
 
@@ -141,7 +144,8 @@ def add_fids(manual_annotations, coverage, manual_annotations_previous):
 
             # check reviews
             rev_match = True
-            for rl in ['R1 - Reviewed','R2 - Reviewed','R1 - VISIONS','R2 - VISIONS']:
+            for rl in ['R1 - Reviewed','R2 - Reviewed','R1 - VISIONS','R2 - VISIONS', 
+                       'Psuedo-Origin', 'Sector', 'Sector Confidence', 'Time Range End', 'Time Range Start']:
                 if feat['properties'][rl] != manual_annotations_previous['features'][prev_idx]['properties'][rl]:
                     rev_match = False
 
@@ -150,8 +154,11 @@ def add_fids(manual_annotations, coverage, manual_annotations_previous):
                 #logging.debug(f'Geometries and properties the same in {feat["properties"]}...skipping safely')
                 continue
 
-        #subset_coverage = roi_filter(time_filter(coverage, feat['properties']['Time Range Start'] + 'Z', feat['properties']['Time Range End'] + 'Z'), Polygon(feat['geometry']['coordinates'][0]))
-        subset_features = spatial_temporal_filter(coverage_df, coverage, Polygon(feat['geometry']['coordinates'][0]), feat['properties']['Time Range Start'] + 'Z', feat['properties']['Time Range End'] + 'Z') 
+        roi = Polygon(feat['geometry']['coordinates'][0])
+        roi = shapely.buffer(roi, 0.01, join_style='mitre')
+        subset_features = spatial_temporal_filter(coverage_df, coverage, roi, 
+                                                  feat['properties']['Time Range Start'] + 'Z', 
+                                                  feat['properties']['Time Range End'] + 'Z') 
         if len(subset_features) == 0:
             todel.append(_feat)
         else:
@@ -192,16 +199,23 @@ def add_orbits(annotations, indices_to_update, database):
             annotations['features'][ind]['properties']['orbit'] = []
             ind_to_pop.append(ind)
             update_ind_to_pop.append(_ind)
-
             continue
+
         if len(un_dcids) > 1:
-            logging.error('Ack - entry {annotations["features"][ind]} spans two dcids')
+            logging.error(f'Ack - entry {annotations["features"][ind]} spans two dcids')
+            annotations['features'][ind]['properties']['orbit'] = []
+            ind_to_pop.append(ind)
+            update_ind_to_pop.append(_ind)
+            continue
 
         annotations['features'][ind]['properties']['orbit'] = un_orbits[0]
         annotations['features'][ind]['properties']['dcid'] = un_dcids[0]
         annotations['features'][ind]['properties']['daac_scenes'] = scene_numbers
     
+    if len(ind_to_pop) > 0:
+        logging.info('Bad plume list:')
     for ind in np.array(ind_to_pop)[::-1]:
+        logging.info(annotations['features'][ind]['properties']['Plume ID'])
         annotations['features'].pop(ind)
 
     indices_to_update = np.array(indices_to_update)
@@ -236,7 +250,7 @@ def write_color_plume(rawdat, plumes_mask, glt_ds, outname: str, style = 'ch4'):
         colorized[plumes_mask,:] = plt.cm.viridis(dat[plumes_mask])[...,:3]
 
 
-    colorized = np.round(colorized * 255).astype(np.uint8)
+    colorized = (colorized * 255).astype(np.uint8)
     colorized[plumes_mask,:] = np.maximum(1, colorized[plumes_mask,:])
 
     write_output_file(glt_ds, colorized, outname)
@@ -351,12 +365,23 @@ def main(input_args=None):
 
         # Step through each new plume
         manual_annotations, new_plumes = add_fids(manual_annotations, coverage, manual_annotations_previous)
+        manual_annotations_df = pd.json_normalize(manual_annotations['features'])
+        most_recent_plume_create = pd.to_datetime(manual_annotations_df['properties.Time Created']).max()
+        last_time_range = pd.to_datetime(manual_annotations_df['properties.Time Range End']).dt.tz_localize('UTC').max()
+
+        coverage_df = pd.json_normalize(coverage['features'])
+        r0_review_needed = np.sum(pd.to_datetime(coverage_df['properties.end_time']) > last_time_range)
+
         double_approved_count = np.sum([ np.all([x['properties'][k] for k in ['R1 - Reviewed', 'R1 - VISIONS', 'R2 - Reviewed', 'R2 - VISIONS']]) for x in manual_annotations['features']])
         r1_review_count = np.sum([ x['properties']['R1 - Reviewed'] is False for x in manual_annotations['features']])
         r2_review_count = np.sum([ np.all([x['properties'][k] for k in ['R1 - Reviewed', 'R1 - VISIONS']]) and not x['properties']['R2 - Reviewed'] for x in manual_annotations['features']])
-        print(f'Plume Complexes Approved for VISIONS: {double_approved_count}')
-        print(f'R1 Review Deck: {r1_review_count}')
-        print(f'R2 Review Deck: {r2_review_count}')
+        logging.info(f'Plume Complexes Approved for VISIONS: {double_approved_count}')
+        logging.info(f'R1 Review Deck: {r1_review_count}')
+        logging.info(f'R2 Review Deck: {r2_review_count}')
+        logging.info(f'Most Recent R0 Plume Created: {most_recent_plume_create}')
+        logging.info(f'Most Recent R0 Plume Scene: {last_time_range}')
+        logging.info(f'Most Recent Scene: {coverage["features"][-1]["properties"]["end_time"]}')
+        logging.info(f'Inferred scenes needing R0 Review: {r0_review_needed}')
         # If there's nothing new, sleep and retry
         if len(new_plumes) == 0:
             time.sleep(10)

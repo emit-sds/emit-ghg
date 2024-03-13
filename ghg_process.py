@@ -46,6 +46,7 @@ def main(input_args=None):
     parser.add_argument('--ace_filter', action='store_true',  help='use an ACE filter during matched filter')    
     parser.add_argument('--loglevel', type=str, default='INFO', help='logging verbosity')    
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')    
+    parser.add_argument('--mask_flares', type=int, default=1, help='mask flares in output')    
     parser.add_argument('--co2', action='store_true', help='flag to indicate whether to run co2')    
     args = parser.parse_args(input_args)
 
@@ -147,14 +148,16 @@ def main(input_args=None):
 
 
     if (os.path.isfile(co2_mf_file) is False or args.overwrite) and args.co2:
-        subargs = [args.radiance_file, co2_target_file, co2_mf_file, args.l1b_bandmask_file, args.l2a_mask_file]
+        subargs = [args.radiance_file, co2_target_file, co2_mf_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, '--wavelength_range', '1900', '2350', '--fixed_alpha', '0.0000000001', '--mask_clouds_water']
         if args.ace_filter:
             subargs.append('--use_ace_filter')
         parallel_mf.main(subargs)
     
     if os.path.isfile(ch4_mf_file) is False or args.overwrite:
         logging.info('starting parallel mf')
-        subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, '--wavelength_range', '500', '2450', '--fixed_alpha', '0.0000000001', '--mask_clouds_water', '--mask_flares', '--flare_outfile', flare_file]
+        subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, '--wavelength_range', '500', '2450', '--fixed_alpha', '0.0000000001', '--mask_clouds_water', '--flare_outfile', flare_file]
+        if args.mask_flares == 1:
+            subargs.append('--mask_flares')
         if args.ace_filter:
             subargs.append('--use_ace_filter')
         parallel_mf.main(subargs)
