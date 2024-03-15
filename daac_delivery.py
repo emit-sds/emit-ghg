@@ -1,5 +1,5 @@
 """
-Delivers L2B CH4 Enhancement Data and Plumes to the DAAC
+Delivers L2B CH4/CO2 Enhancement Data and Plumes to the DAAC
 
 Author: Winston Olson-Duvall, winston.olson-duvall@jpl.nasa.gov
 """
@@ -294,6 +294,7 @@ def submit_cnm_notification(wm, acq, base_dir, granule_ur, files, formats, colle
     utc_now = datetime.datetime.now(tz=datetime.timezone.utc)
     cnm_submission_id = f"{granule_ur}_{utc_now.strftime('%Y%m%dt%H%M%S')}"
     cnm_submission_path = os.path.join(base_dir, cnm_submission_id + "_cnm.json")
+    # TODO: Use S3 provider?
     provider = wm.config["daac_provider_forward"]
     queue_url = wm.config["daac_submission_url_forward"]
 
@@ -338,14 +339,21 @@ def submit_cnm_notification(wm, acq, base_dir, granule_ur, files, formats, colle
         raise RuntimeError(output.stderr.decode("utf-8"))
 
 
-def deliver_ch4enh(base_dir, fname, wm, ghg_config):
-    print(f"Doing ch4enh delivery with fname {fname}")
+def deliver_enh(base_dir, fname, wm, ghg_config):
+    if "ch4" in fname:
+        GHG = "CH4"
+    elif "co2" in fname:
+        GHG = "CO2"
+    else:
+        print("Unable to match a GHG for enh delivery.  Returning...")
+        return
+    print(f"Doing {GHG} enh delivery with fname {fname}")
 
     # Get scene details and create Granule UR
-    # Example granule_ur: EMIT_L2B_CH4ENH_001_20230805T195459_2321713_001
+    # Example granule_ur: EMIT_L2B_{CH4,CO2}ENH_001_20230805T195459_2321713_001
     acq = wm.acquisition
-    collection = "EMITL2BCH4ENH"
-    prod_type = "CH4ENH"
+    collection = f"EMITL2B{GHG}ENH"
+    prod_type = f"{GHG}ENH"
     granule_ur = f"EMIT_L2B_{prod_type}_{ghg_config['collection_version']}_{acq.start_time.strftime('%Y%m%dT%H%M%S')}_{acq.orbit}_{acq.daac_scene}"
 
     # Create local/tmp daac names and paths
@@ -383,7 +391,7 @@ def deliver_ch4enh(base_dir, fname, wm, ghg_config):
                            sds_software_build_version=sds_software_build_version,
                            ghg_software_build_version=ghg_software_build_version,
                            ghg_software_delivery_version=ghg_config["repo_version"],
-                           doi=ghg_config["dois"]["EMITL2BCH4ENH"], orbit=int(acq.orbit), orbit_segment=int(acq.scene),
+                           doi=ghg_config["dois"][collection], orbit=int(acq.orbit), orbit_segment=int(acq.scene),
                            scene=int(acq.daac_scene), solar_zenith=mean_solar_zenith,
                            solar_azimuth=mean_solar_azimuth, cloud_fraction=acq.cloud_fraction)
     ummg = add_data_files_ummg(ummg, files[:2], daynight, ["TIFF", "PNG"])
@@ -401,15 +409,22 @@ def deliver_ch4enh(base_dir, fname, wm, ghg_config):
                             ghg_config["collection_version"])
 
 
-def deliver_ch4plm(base_dir, fname, wm, ghg_config):
-    print(f"Doing ch4plm delivery with fname {fname}")
+def deliver_plm(base_dir, fname, wm, ghg_config):
+    if "CH4" in fname:
+        GHG = "CH4"
+    elif "CO2" in fname:
+        GHG = "CO2"
+    else:
+        print("Unable to match a GHG for plm delivery.  Returning...")
+        return
+    print(f"Doing {GHG} plm delivery with fname {fname}")
 
     # Get scene details and create Granule UR
-    # Example granule_ur: EMIT_L2B_CH4PLM_001_20230805T195459_000109
+    # Example granule_ur: EMIT_L2B_{CH4,CO2}PLM_001_20230805T195459_000109
     acq = wm.acquisition
     plume_id = str(int(fname.split(".")[0].split("-")[1])).zfill(6)
-    collection = "EMITL2BCH4PLM"
-    prod_type = "CH4PLM"
+    collection = f"EMITL2B{GHG}PLM"
+    prod_type = f"{GHG}PLM"
     granule_ur = f"EMIT_L2B_{prod_type}_{ghg_config['collection_version']}_{acq.start_time.strftime('%Y%m%dT%H%M%S')}_{plume_id}"
 
     # Create local/tmp daac names and paths
@@ -417,12 +432,12 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
     local_geojson_path = local_plm_path.replace(".tif", ".json")
     local_browse_path = local_plm_path.replace(".tif", ".png")
     local_ummg_path = local_plm_path.replace(".tif", ".cmr.json")
-    daac_enh_name = f"{granule_ur}.tif"
-    daac_geojson_name = f"{granule_ur.replace('CH4PLM', 'CH4PLMMETA')}.json"
+    daac_plm_name = f"{granule_ur}.tif"
+    daac_geojson_name = f"{granule_ur.replace(f'{GHG}PLM', f'{GHG}PLMMETA')}.json"
     daac_browse_name = f"{granule_ur}.png"
     daac_ummg_name = f"{granule_ur}.cmr.json"
     # daac_ummg_path = os.path.join(base_dir, daac_ummg_name)
-    files = [(local_plm_path, daac_enh_name),
+    files = [(local_plm_path, daac_plm_name),
              (local_geojson_path, daac_geojson_name),
              (local_browse_path, daac_browse_name),
              (local_ummg_path, daac_ummg_name)]
@@ -465,7 +480,7 @@ def deliver_ch4plm(base_dir, fname, wm, ghg_config):
                            sds_software_build_version=sds_software_build_version,
                            ghg_software_build_version=ghg_software_build_version,
                            ghg_software_delivery_version=ghg_config["repo_version"],
-                           doi=ghg_config["dois"]["EMITL2BCH4PLM"], orbit=int(acq.orbit), orbit_segment=int(acq.scene),
+                           doi=ghg_config["dois"][collection], orbit=int(acq.orbit), orbit_segment=int(acq.scene),
                            solar_zenith=mean_solar_zenith, solar_azimuth=mean_solar_azimuth,
                            cloud_fraction=mean_cloud_fraction, source_scenes=source_scenes, plume_id=int(plume_id))
     ummg = add_data_files_ummg(ummg, files[:3], daynight, ["TIFF", "JSON", "PNG"])
@@ -510,13 +525,16 @@ def main():
         raise RuntimeError(output.stderr.decode("utf-8"))
     repo_version = output.stdout.decode("utf-8").replace("\n", "")
 
+    # TODO: If collection version and DOI don't go hand in hand then adjust dois below
     ghg_config = {
         "collection_version": args.collection_version,
         "repo_name": "emit-ghg",
         "repo_version": repo_version,
         "dois": {
-            "EMITL2BCH4ENH": "10.5067/EMIT/EMITL2BCH4ENH.001",
-            "EMITL2BCH4PLM": "10.5067/EMIT/EMITL2BCH4PLM.001"
+            "EMITL2BCH4ENH": f"10.5067/EMIT/EMITL2BCH4ENH.{args.collection_version}",
+            "EMITL2BCH4PLM": f"10.5067/EMIT/EMITL2BCH4PLM.{args.collection_version}",
+            "EMITL2BCO2ENH": f"10.5067/EMIT/EMITL2BCO2ENH.{args.collection_version}",
+            "EMITL2BCO2PLM": f"10.5067/EMIT/EMITL2BCO2PLM.{args.collection_version}"
         }
     }
 
@@ -531,9 +549,9 @@ def main():
     wm = WorkflowManager(config_path=sds_config_path, acquisition_id=acq_id)
 
     if "enh" in fname:
-        deliver_ch4enh(base_dir, fname, wm, ghg_config)
+        deliver_enh(base_dir, fname, wm, ghg_config)
     elif "Plume" in fname:
-        deliver_ch4plm(base_dir, fname, wm, ghg_config)
+        deliver_plm(base_dir, fname, wm, ghg_config)
 
 
 if __name__ == '__main__':
