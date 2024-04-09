@@ -192,6 +192,7 @@ def main(input_args=None):
     parser.add_argument('--visions_delivery', type=int, choices=[0,1,2],default=0)
     parser.add_argument('--n_cores', type=int, default=1)
     parser.add_argument('--overwrite', action='store_true')
+    parser.add_argument('--previous_plume_file', type=str, default='visions_delivery/plume_list.txt')
     parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')    
     args = parser.parse_args(input_args)
@@ -200,6 +201,10 @@ def main(input_args=None):
                         filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
 
     tile_dir = os.path.join(args.dest_dir, 'ch4_plume_tiles')
+
+    with open(args.previous_plume_file,'r') as f:
+        delivered_plume_names = f.read().splitlines()
+        delivered_plume_ids = [f'CH4_PlumeComplex-{x.split("_")[-1]}' for x in delivered_plume_names]
 
 
     all_plume_meta = json.load(open(f'{args.manual_del_dir}/combined_plume_metadata.json'))
@@ -249,23 +254,26 @@ def main(input_args=None):
     extra_metadata['title'] = "EMIT"
     extra_metadata['Units']= 'ppm m'
 
+    print(delivered_plume_ids)
 
     if args.visions_delivery != 2:
+
         jobs = []
         for _feat, feat in enumerate(all_plume_meta['features']):
             if _feat not in valid_plume_idx:
                 continue
+            complex_id= feat['properties']['Plume ID'].split('-')[-1]
+            if f'CH4_PlumeComplex-{complex_id.zfill(6)}' in delivered_plume_ids:
+                continue
             logging.info(f'Processing plume {_feat+1}/{len(all_plume_meta["features"])}')
-
 
             if feat['geometry']['type'] == 'Polygon':
                 outdir=os.path.join(args.dest_dir, feat['properties']['Scene FIDs'][0][4:12], 'l2bch4plm')
                 if os.path.isdir(outdir) is False:
                     subprocess.call(f'mkdir -p {outdir}',shell=True)
                 output_base = os.path.join(outdir, feat['properties']['Scene FIDs'][0] + '_' + feat['properties']['Plume ID'])
-                if args.overwrite or os.path.isfile(output_base) is False:
+                if args.overwrite or os.path.isfile(output_base + '.tif') is False:
                     jobs.append(single_plume_proc.remote(all_plume_meta, _feat, output_base, args.manual_del_dir, args.source_dir, extra_metadata))
-
         rreturn = [ray.get(jid) for jid in jobs]
 
 
