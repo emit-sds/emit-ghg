@@ -190,7 +190,7 @@ def main(input_args=None):
         saturation = None
         if args.l1b_bandmask_file is not None:
             logging.debug("loading pixel mask")
-            dilated_saturation, saturation = calculate_saturation_mask(args.l1b_bandmask_file, chunk_edges=[ce,chunk_edges[_ce+1]])
+            dilated_saturation, saturation = calculate_saturation_mask(args.l1b_bandmask_file, radiance, chunk_edges=[ce,chunk_edges[_ce+1]])
             good_pixel_mask[dilated_saturation] = False
 
         logging.debug("adding flare mask")

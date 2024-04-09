@@ -72,6 +72,10 @@ def main(input_args=None):
     co2_mf_file = f'{args.output_base}_co2_mf'
     ch4_mf_file = f'{args.output_base}_ch4_mf'
 
+    ch4_mf_uncert_file = f'{args.output_base}_ch4_mf_uncert'
+    ch4_mf_sens_file = f'{args.output_base}_ch4_mf_sensitivity'
+    emit_noise_parameters_file = f'./instrument_noise_parameters/emit_noise.txt'
+
     # Flares
     flare_file = f'{args.output_base}_flares.json'
 
@@ -157,12 +161,16 @@ def main(input_args=None):
         logging.info('starting parallel mf')
         
         #subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, ch4_mf_uncert_file, ch4_mf_sens_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, \
-        #           '--wavelength_range', '500', '1340', '1500', '1790', '1950', '2450', '--fixed_alpha', '0.0000000001', '--mask_clouds_water', '--mask_flares', '--flare_outfile', flare_file,
+        #           '--wavelength_range', '500', '1340', '1500', '1790', '1950', '2450', '--fixed_alpha', '0.0000000001', '--mask_clouds_water', '--mask_flares', '--flare_outfile', flare_file, \
+
         #           '--noise_parameters_file', '/beegfs/scratch/jfahlen/emit_radiance_model/emit_noise.txt']
 
+        #subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, '--wavelength_range', '500', '2450', '--fixed_alpha', '0.0000000001', '--mask_clouds_water', '--flare_outfile', flare_file]
+        #subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, '--wavelength_range', '500', '1340', '1500', '1790', '1950', '2450', \
+        subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, '--wavelength_range', '500', '1340', '1500', '1790', '2030', '2450', \
+                   '--fixed_alpha', '0.0000000001', '--mask_clouds_water', '--flare_outfile', flare_file, \
+                   '--noise_parameters_file', emit_noise_parameters_file, '--sens_output_file', ch4_mf_sens_file, '--uncert_output_file', ch4_mf_uncert_file]
 
-
-        subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, '--wavelength_range', '500', '2450', '--fixed_alpha', '0.0000000001', '--mask_clouds_water', '--flare_outfile', flare_file]
         if args.mask_flares == 1:
             subargs.append('--mask_flares')
         if args.ace_filter:
