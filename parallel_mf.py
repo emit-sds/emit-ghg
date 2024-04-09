@@ -76,13 +76,13 @@ def main(input_args=None):
     parser.add_argument('--noise_parameters_file', type=str, default=None, help='Mandatory input to produce uncertainty metric. EMIT file found here: https://github.com/isofit/isofit/blob/dev/data/emit_noise.txt')         
     args = parser.parse_args(input_args)
 
-    if (args.uncert_output_file is not None and args.sens_output_file is None) or 
+    if (args.uncert_output_file is not None and args.sens_output_file is None) or \
        (args.uncert_output_file is None and args.sens_output_file is not None):
         m = 'Both uncert_output_file and sens_output_file must be provided if either is provided. Only one or the other was provided.'
         raise ValueError(m)
 
     if args.uncert_output_file is not None and args.noise_parameters_file is None:
-        m = 'Argument uncert_output_file is provided but noise_parameters_file is not. ' +
+        m = 'Argument uncert_output_file is provided but noise_parameters_file is not. ' + \
             'The noise_parameters_file must be provided to generate the uncertainty.'
         raise ValueError(m)
 
