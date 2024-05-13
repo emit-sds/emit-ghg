@@ -24,7 +24,7 @@ import argparse
 from spectral.io import envi
 
 import sys
-import scipy
+import scipy.linalg
 import scipy.ndimage
 import numpy as np
 from utils import envi_header, write_bil_chunk
