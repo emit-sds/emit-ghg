@@ -27,7 +27,7 @@ import sys
 import scipy
 import scipy.ndimage
 import numpy as np
-from utils import envi_header, write_bil_chunk
+from utils import envi_header, write_bil_chunk, ReadAbstractDataSet, WriteAbstractDataSet
 import json
 from utils import SerialEncoder
 import pdb
@@ -41,7 +41,6 @@ if os.environ.get("GHG_DEBUG"):
     import rray as ray
 else:
     import ray
-
 
 def main(input_args=None):
     parser = argparse.ArgumentParser(description="Robust MF")
@@ -79,10 +78,7 @@ def main(input_args=None):
    
     
     logging.info('Started processing input file: "%s"'%str(args.radiance_file))
-    ds = envi.open(envi_header(args.radiance_file),image=args.radiance_file)
-    if 'wavelength' not in ds.metadata:
-        logging.error('wavelength field not found in input header')
-        sys.exit(0)
+    ds = ReadAbstractDataSet(args.radiance_file)
     wavelengths = np.array([float(x) for x in ds.metadata['wavelength']])
 
     if args.wavelength_range is None:
@@ -106,7 +102,7 @@ def main(input_args=None):
         la = np.where(np.logical_and(wavelengths > args.wavelength_range[2*n], wavelengths <= args.wavelength_range[2*n+1]))[0]
         active_wl_idx.extend(la.tolist())
     always_exclude_idx = []
-    if 'emit' in args.radiance_file:
+    if 'emit' in args.radiance_file.lower():
         always_exclude_idx = np.where(np.logical_and(wavelengths < 1321, wavelengths > 1275))[0].tolist()
     active_wl_idx = np.array([x for x in active_wl_idx if x not in always_exclude_idx])
 
@@ -128,10 +124,9 @@ def main(input_args=None):
     for kwarg in ['smoothing factors','wavelength','wavelength units','fwhm']:
         outmeta.pop(kwarg,None)
 
-    output_ds = envi.create_image(envi_header(args.output_file),outmeta,force=True,ext='')
-    del output_ds
+    output_ds = WriteAbstractDataSet(args.output_file, outmeta = outmeta)
     output_shape = (int(outmeta['lines']),int(outmeta['bands']),int(outmeta['samples']))
-    write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.output_file, 0, output_shape)
+    output_ds.write(np.ones(output_shape)*args.nodata_value, 0, output_shape)
 
  
     if args.chunksize is None:
@@ -154,7 +149,7 @@ def main(input_args=None):
         if rdn_id is not None:
             del rdn_id; rdn_id = None
         logging.info(f"load radiance for chunk {_ce +1} / {len(chunk_edges) - 1}")
-        radiance = ds.open_memmap(interleave='bil',writeable=False)[ce:chunk_edges[_ce+1],...].copy()
+        radiance = ds[ce:chunk_edges[_ce+1],...].copy()
         chunk_shape = (chunk_edges[_ce+1] - ce, output_shape[1], output_shape[2])
 
         logging.info("load masks")
@@ -162,7 +157,7 @@ def main(input_args=None):
         saturation = None
         if args.l1b_bandmask_file is not None:
             logging.debug("loading pixel mask")
-            dilated_saturation, saturation = calculate_saturation_mask(args.l1b_bandmask_file, chunk_edges=[ce,chunk_edges[_ce+1]])
+            dilated_saturation, saturation = calculate_saturation_mask(args.l1b_bandmask_file, radiance, chunk_edges=[ce,chunk_edges[_ce+1]])
             good_pixel_mask[dilated_saturation] = False
 
         logging.debug("adding flare mask")
@@ -214,7 +209,7 @@ def main(input_args=None):
             output_dat[dilated_flare_mask,:] = -1 # could be nodata, but setting to 0 keeps maps continuous
             output_dat = output_dat.transpose((0,2,1))
 
-        write_bil_chunk(output_dat, args.output_file, ce, chunk_shape)
+        output_ds.write(output_dat, ce, chunk_shape)
         logging.info('Complete')
 
 

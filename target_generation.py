@@ -18,12 +18,15 @@
 # Authors: Markus Foote
 
 # version working-6 with full modtran runs and warnings and optimizations
+from utils import ReadAbstractDataSet
+
 from os.path import exists
 import numpy as np
 import scipy.ndimage
 import argparse
 import spectral
 import h5py
+import pdb
 
 
 def check_param(value, min, max, name):
@@ -272,9 +275,9 @@ def main(input_args=None):
              'water': args.water_vapor,
              'order': args.order}
     if args.hdr and exists(args.hdr):
-        image = spectral.io.envi.open(args.hdr)
-        centers = np.array([float(x) for x in image.metadata['wavelength']])
-        fwhm = np.array([float(x) for x in image.metadata['fwhm']])
+        ds = ReadAbstractDataSet(args.hdr)
+        centers = ds.metadata['wavelength']
+        fwhm = ds.metadata['fwhm']
     elif args.txt and exists(args.txt):
         data = np.loadtxt(args.txt, usecols=(0, 1),delimiter=',')
         centers = data[:, 0]

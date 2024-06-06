@@ -16,9 +16,12 @@
 #
 # Authors: Philip G. Brodrick, philip.brodrick@jpl.nasa.gov
 
+from spectral.io import envi
+
 import os
 import numpy as np
 import json
+import pdb
 
 def envi_header(inputpath):
     """
@@ -75,3 +78,70 @@ class SerialEncoder(json.JSONEncoder):
         else:
             return super(SerialEncoder, self).default(obj)
 
+class ReadAbstractDataSet():
+    def __init__(self, filename):
+        self.filename = filename
+        
+        if filename[-3:] == '.nc':
+            self.filetype = 'netCDF4'
+        elif os.path.exists(envi_header(filename)):
+            self.filetype = 'ENVI'
+        else:
+            raise ValueError(f'File type of {filename} not recognized.')
+        
+        if self.filetype == 'ENVI':
+            self.ds = envi.open(envi_header(filename), image = filename)
+            self.memmap = self.ds.open_memmap(interleave='bil',writeable=False)
+            self.metadata = self.ds.metadata
+
+            if 'wavelength' not in self.ds.metadata:
+                logging.error('wavelength field not found in input header')
+                sys.exit(0)
+            wavelengths = np.array([float(x) for x in self.ds.metadata['wavelength']])
+            fwhm = np.array([float(x) for x in self.ds.metadata['fwhm']])
+            self.metadata['wavelength'] = wavelengths
+            self.metadata['fwhm'] = fwhm
+        
+        if self.filetype == 'netCDF4':
+            import xarray as xr 
+            self.ds = xr.open_dataset(self.filename, engine = 'netcdf4')
+            wvl = xr.open_dataset(self.filename, engine = 'netcdf4', group = 'sensor_band_parameters')
+            self.radiance = np.ascontiguousarray(np.transpose(self.ds['radiance'].values, [0,2,1]))
+            l, b, s = self.radiance.shape
+
+            self.metadata = {'wavelength': wvl['wavelengths'].values,
+                             'fwhm': wvl['fwhm'].values,
+                             'bands': b,
+                             'lines': l,
+                             'samples': s,
+                             'byte order': 0,
+                             'header offset': 0,
+                             'file_type': 'ENVI Standard',
+                             'sensor type': 'unknown',
+                             'band names': [f'channel_{x:d}' for x in range(b)]}
+
+    
+    def __getitem__(self, key):
+        if self.filetype == 'ENVI':
+            return self.memmap[key]
+        if self.filetype == 'netCDF4':
+            return self.radiance[key]
+
+class WriteAbstractDataSet():
+    def __init__(self, filename, outmeta = None):
+        self.filename = filename
+        
+        if filename[-3:] == '.nc':
+            self.filetype = 'netCDF4'
+            raise NotImplementedError(f'Writing netCDF4 files is not supported')
+        else:
+            self.filetype = 'ENVI'
+        
+        if self.filetype == 'ENVI':
+            ds = envi.create_image(envi_header(filename), outmeta, force = True, ext = '')
+            del ds
+    
+    def write(self, *input_tuple):
+        data, line, shape = input_tuple
+        if self.filetype == 'ENVI':
+            write_bil_chunk(data, self.filename, line, shape)

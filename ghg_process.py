@@ -54,6 +54,8 @@ def main(input_args=None):
 
     radiance_file = args.radiance_file
     radiance_file_hdr = envi_header(radiance_file)
+    if radiance_file[-3:] == '.nc':
+        radiance_file_hdr = radiance_file
  
     obs_file = args.obs_file
     obs_file_hdr = envi_header(obs_file)
