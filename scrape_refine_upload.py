@@ -166,14 +166,14 @@ def add_fids(manual_annotations, coverage, manual_annotations_previous):
             manual_annotations_fid['features'][_feat]['properties']['fids'] = fids
             updated_plumes.append(_feat)
 
-    for td in np.array(todel)[::-1]:
-        msg = f'Deleting entry due to bad metadata - check input {manual_annotations_fid["features"][td]["properties"]}'
-        logging.warning(msg)
-        manual_annotations_fid['features'].pop(td)
     logging.warning('Bad metadata for the following plumes:')
     for td in np.array(todel)[::-1]:
         msg = f'{manual_annotations_fid["features"][td]["properties"]["Plume ID"]}'
         logging.warning(msg)
+    for td in np.array(todel)[::-1]:
+        msg = f'Deleting entry due to bad metadata - check input {manual_annotations_fid["features"][td]["properties"]}'
+        logging.warning(msg)
+        manual_annotations_fid['features'].pop(td)
 
     updated_plumes = np.array([x for x in updated_plumes if x not in todel]) # shouldn't be necessary anymore, deosn't hurt
     for td in np.array(todel)[::-1]:
