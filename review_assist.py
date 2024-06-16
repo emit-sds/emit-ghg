@@ -25,12 +25,20 @@ from matplotlib.backends.backend_pdf import PdfPages
 from osgeo import gdal
 import os
 import json
-from scrape_refine_upload import spatial_temporal_filter
 import pandas as pd
 from shapely.geometry import Polygon
 import glob
 import apply_glt
 
+
+def spatial_temporal_filter(cov_df, coverage, roi, start_time, end_time):
+
+    temporal_inds = np.where(np.logical_and(cov_df['properties.start_time'] >= pd.to_datetime(start_time) , 
+                                            cov_df['properties.end_time'] <= pd.to_datetime(end_time) ))[0]
+    spatial_inds = np.where(cov_df['geometry.coordinates'][:][temporal_inds].apply(lambda s,
+                        roi=roi: s.intersects(roi)))[0]
+
+    return [coverage['features'][i] for i in temporal_inds[spatial_inds]]
 
 
 def multifile_rawspace_conversion(glt_files, coordinates):
@@ -88,18 +96,20 @@ def lonlat_from_coords(coords):
 
 def read_from_bounds(ds, coords, buffer=50):
     lons, lats = lonlat_from_coords(coords)
+
     trans = ds.GetGeoTransform()
-    x_off = int(np.round(np.min(lons) - trans[0])/trans[1])
+    #import ipdb; ipdb.set_trace()
+    x_off = int(np.round((np.min(lons) - trans[0])/trans[1]))
     x_size = int(np.round((np.max(lons) - np.min(lons))/trans[1]))
 
-    y_off = int(np.round(np.max(lats) - trans[3])/trans[5])
+    y_off = int(np.round((np.max(lats) - trans[3])/trans[5]))
     y_size = int(np.round((np.min(lats) - np.max(lats))/trans[5]))
 
     x_off = max(x_off - buffer,0)
-    x_size = min(x_size + buffer, ds.RasterXSize - x_off)
+    x_size = min(x_size + 2*buffer, ds.RasterXSize - x_off)
 
     y_off = max(y_off - buffer,0)
-    y_size = min(y_size + buffer, ds.RasterYSize - y_off)
+    y_size = min(y_size + 2*buffer, ds.RasterYSize - y_off)
 
     dat = ds.ReadAsArray(x_off, y_off, x_size, y_size)
     if len(dat.shape) == 3:
@@ -133,12 +143,13 @@ def add_mf(fids, coord_list, sourcedir):
     #dat = read_raw_from_bounds(mf_files, rawspace_coords)
 
 
-    dat /= 1500
-    dat[dat > 1] = 1
-    dat[dat < 0] = 0
-    dat[dat == 0] = 0.01
-    plt.imshow(dat, cmap='plasma')
-    plt.axis('off')
+    #dat /= 1500
+    #dat[dat > 1] = 1
+    #dat[dat < 0] = 0
+    #dat[dat == 0] = 0.01
+    plt.imshow(dat, vmin=0, vmax=1500, cmap='plasma')
+    plt.colorbar()
+    #plt.axis('off')
     plot_plume(coord_list, x_off, y_off, vrt_ds.GetGeoTransform())
 
 
@@ -146,11 +157,11 @@ def add_minerology(fids, coord_list, scratchdir, group='1'):
 
     min_ort_files = []
     for fid in fids:
-        glt_file = get_glt_file(fid)
-        min_file = get_min_file(fid)
         min_ort_file = os.path.join(scratchdir, f"{fid}_min_ort")
-
-        apply_glt.main([glt_file, min_file, min_ort_file])
+        if os.path.isfile(min_ort_file) is False:
+            glt_file = get_glt_file(fid)
+            min_file = get_min_file(fid)
+            apply_glt.main([glt_file, min_file, min_ort_file])
         min_ort_files.append(min_ort_file)
     
     vrt_ds = gdal.BuildVRT('', min_ort_files)
@@ -164,8 +175,8 @@ def add_minerology(fids, coord_list, scratchdir, group='1'):
     col_min1 = plt.get_cmap('tab20')(min/np.max(min))
     col_min1[mask] = [0,0,0,0]
     
-    plt.imshow(min)
-    plt.axis('off')
+    plt.imshow(col_min1)
+    #plt.axis('off')
     plot_plume(coord_list, x_off, y_off, vrt_ds.GetGeoTransform())
 
 
@@ -173,11 +184,11 @@ def add_cover(fids, coord_list, scratchdir, group='1'):
 
     cover_ort_files = []
     for fid in fids:
-        glt_file = get_glt_file(fid)
-        cover_file = get_cover_file(fid)
         cover_ort_file = os.path.join(scratchdir, f"{fid}_cover_ort")
-
-        apply_glt.main([glt_file, cover_file, cover_ort_file])
+        if os.path.isfile(cover_ort_file) is False:
+            glt_file = get_glt_file(fid)
+            cover_file = get_cover_file(fid)
+            apply_glt.main([glt_file, cover_file, cover_ort_file])
         cover_ort_files.append(cover_ort_file)
     
     vrt_ds = gdal.BuildVRT('', cover_ort_files)
@@ -188,7 +199,7 @@ def add_cover(fids, coord_list, scratchdir, group='1'):
     dat = dat / np.nanpercentile(dat, 98, axis=(0,1))[np.newaxis,np.newaxis,:]
     
     plt.imshow(dat)
-    plt.axis('off')
+    #plt.axis('off')
     plot_plume(coord_list, x_off, y_off, vrt_ds.GetGeoTransform())
  
 
@@ -211,7 +222,7 @@ def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, out
         loc_coords = plume_info['geometry']['coordinates'][0]
 
 
-        # Add current, previous, and next matched filter outputs
+        ############ Add current, previous, and next matched filter outputs #############
 
         # Previous
         ax = fig.add_subplot(gs[0:2, 0:2])
@@ -226,13 +237,13 @@ def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, out
 
 
         # Current
-        ax = fig.add_subplot(gs[2:4, 0:2])
+        ax = fig.add_subplot(gs[0:2, 2:4])
         add_mf(plume_info['properties']['fids'], loc_coords, sourcedir)
         plt.title('Current MF; ' + plume_info['properties']['fids'][0])
 
 
         # Future
-        ax = fig.add_subplot(gs[4:6, 0:2])
+        ax = fig.add_subplot(gs[0:2, 4:6])
         dt = pd.to_datetime(plume_info['properties']['Time Range End']) + pd.Timedelta('1 minute')
         dts = dt.strftime('%Y-%m-%dT%H:%M:%SZ')
         subset_features = spatial_temporal_filter(coverage_df, coverage, Polygon(loc_coords), dts, '2040-01-01T00:00:00Z')
@@ -242,18 +253,19 @@ def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, out
         plt.title('Next MF; ' + fids[-1])
 
 
+        ################ Surface Features #########################
         # Add minerology
-        ax = fig.add_subplot(gs[0:2, 2:4])
-        add_minerology(fids, loc_coords, scratchdir, group='1')
+        ax = fig.add_subplot(gs[2:4, 0:2])
+        add_minerology(plume_info['properties']['fids'], loc_coords, scratchdir, group='1')
         plt.title('Group 1 Minerals')
 
         ax = fig.add_subplot(gs[2:4, 2:4])
-        add_minerology(fids, loc_coords, scratchdir, group='1')
+        add_minerology(plume_info['properties']['fids'], loc_coords, scratchdir, group='2')
         plt.title('Group 2 Minerals')
 
         # fractional cover
-        ax = fig.add_subplot(gs[4:6, 2:4])
-        add_cover(fids, loc_coords, scratchdir, group='1')
+        ax = fig.add_subplot(gs[2:4,4:6])
+        add_cover(plume_info['properties']['fids'], loc_coords, scratchdir, group='1')
         plt.title('Fractional Cover')
 
         # Add radiance and reflectance plots
@@ -270,7 +282,6 @@ def main(input_args=None):
     parser.add_argument('--scratch_dir', type=str,  metavar='OUTPUT_DIR', help='output directory')   
     parser.add_argument('--source_dir', type=str,  default='/beegfs/scratch/brodrick/methane/methane_20230813', metavar='INPUT_DIR', help='input directory')   
     parser.add_argument('--type', type=str,  choices=['ch4','co2'], default='ch4')   
-    parser.add_argument('--database_config', type=str,  default='/beegfs/store/emit//ops/repos/emit-main/emit_main/config/ops_sds_config.json')   
     parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')    
     parser.add_argument('--continuous', action='store_true', help='run continuously')    
