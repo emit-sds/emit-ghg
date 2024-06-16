@@ -57,12 +57,12 @@ def multifile_rawspace_conversion(glt_files, coordinates):
     return rawspace_coords
 
 
-def get_mf_ort_file(fid, sourcedir):
-    return os.path.join(sourcedir, f"{fid}_mf_ort")
+def get_mf_ort_file(fid, sourcedir, gtype='ch4'):
+    return os.path.join(sourcedir, fid.split("_")[0][4:12], f'{fid.split("_")[0]}_{gtype}_mf_ort')
 
 
-def get_mf_file(fid, sourcedir):
-    return os.path.join(sourcedir, f"{fid}_mf")
+def get_mf_file(fid, sourcedir, gtype='ch4'):
+    return os.path.join(sourcedir, fid.split("_")[0][4:12], f'{fid.split("_")[0]}_{gtype}_mf')
 
 
 def get_glt_file(fid):
@@ -124,6 +124,7 @@ def add_mf(fids, coord_list, sourcedir):
     if len(fids) == 0:
         return 
     mf_files = [get_mf_ort_file(fid, sourcedir) for fid in fids]
+    print(mf_files)
     vrt_ds = gdal.BuildVRT('', mf_files)
     dat, x_off, y_off = read_from_bounds(vrt_ds, coord_list)
 
@@ -216,9 +217,10 @@ def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, out
         ax = fig.add_subplot(gs[0:2, 0:2])
         dt = pd.to_datetime(plume_info['properties']['Time Range Start']) - pd.Timedelta('1 minute')
         dts = dt.strftime('%Y-%m-%dT%H:%M:%SZ')
-        subset_features = spatial_temporal_filter(coverage, coverage_df, loc_coords, '2020-01-01T00:00:00', dts)
-        subset_features = [subset_features['features'][-1]] #todo - be more clever about this
-        fids = [x['properties']['fid'] for x in subset_features['features']]
+        subset_features = spatial_temporal_filter(coverage_df, coverage, Polygon(loc_coords), '2020-01-01T00:00:00Z', dts)
+        print(subset_features)
+        subset_features = [subset_features[-1]] #todo - be more clever about this
+        fids = [x['properties']['fid'] for x in subset_features]
         add_mf(fids, loc_coords, sourcedir)
         plt.title('Previous MF; ' + fids[-1])
 
@@ -233,9 +235,9 @@ def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, out
         ax = fig.add_subplot(gs[4:6, 0:2])
         dt = pd.to_datetime(plume_info['properties']['Time Range End']) + pd.Timedelta('1 minute')
         dts = dt.strftime('%Y-%m-%dT%H:%M:%SZ')
-        subset_features = spatial_temporal_filter(coverage, coverage_df, loc_coords, dts, '2040-01-01T00:00:00')
-        subset_features = [subset_features['features'][0]] #todo - be more clever about this
-        fids = [x['properties']['fid'] for x in subset_features['features']]
+        subset_features = spatial_temporal_filter(coverage_df, coverage, Polygon(loc_coords), dts, '2040-01-01T00:00:00Z')
+        subset_features = [subset_features[0]] #todo - be more clever about this
+        fids = [x['properties']['fid'] for x in subset_features]
         add_mf(fids, loc_coords, sourcedir)
         plt.title('Next MF; ' + fids[-1])
 
@@ -256,11 +258,14 @@ def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, out
 
         # Add radiance and reflectance plots
 
+        pdf.savefig(bbox_inches='tight')
+        plt.close()
 
 
 
 def main(input_args=None):
     parser = argparse.ArgumentParser(description="merge jsons")
+    parser.add_argument('--plm_dir', type=str,  metavar='PLM_DIR', help='plume_directory')   
     parser.add_argument('--out_dir', type=str,  metavar='OUTPUT_DIR', help='output directory')   
     parser.add_argument('--scratch_dir', type=str,  metavar='OUTPUT_DIR', help='output directory')   
     parser.add_argument('--source_dir', type=str,  default='/beegfs/scratch/brodrick/methane/methane_20230813', metavar='INPUT_DIR', help='input directory')   
@@ -277,7 +282,7 @@ def main(input_args=None):
     if os.path.isdir(args.scratch_dir) is False:
         subprocess.call(f'mkdir {args.scratch_dir}',shell=True)
 
-    previous_annotation_file = os.path.join(args.out_dir, "previous_manual_annotation.json")
+    previous_annotation_file = os.path.join(args.plm_dir, "previous_manual_annotation.json")
 
     annotation = json.load(open(previous_annotation_file, 'r'))
     coverage = json.load(open(args.track_coverage_file, 'r'))
@@ -288,8 +293,8 @@ def main(input_args=None):
     coverage_df['properties.end_time'] = pd.to_datetime(coverage_df['properties.end_time'])
 
     for plume in annotation['features']:
-        outfile = os.path.join(args.out_dir, f"{plume['date']}_{plume['time']}.pdf")
-        build_pdf_page(plume, coverage, coverage_df, args.sourcedir, args.scratch_dir, outfile)
+        outfile = os.path.join(args.out_dir, f'{plume["properties"]["Plume ID"].replace(" ","_")}.pdf')
+        build_pdf_page(plume, coverage, coverage_df, args.source_dir, args.scratch_dir, outfile)
         exit()
 
 
