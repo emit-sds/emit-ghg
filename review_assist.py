@@ -29,6 +29,7 @@ import pandas as pd
 from shapely.geometry import Polygon
 import glob
 import apply_glt
+from mpl_toolkits.basemap import Basemap
 
 
 def spatial_temporal_filter(cov_df, coverage, roi, start_time, end_time):
@@ -87,6 +88,14 @@ def get_cover_file(fid):
     cover_file = sorted(glob.glob(f'/beegfs/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid.split("_")[0]}/l3/*_l3_cover_*.img'))[-1]
     return cover_file
 
+def get_rdn_file(fid):
+    cover_file = sorted(glob.glob(f'/beegfs/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid.split("_")[0]}/l1b/*_l1b_rdn_*.img'))[-1]
+    return cover_file
+
+def get_ref_file(fid):
+    cover_file = sorted(glob.glob(f'/beegfs/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid.split("_")[0]}/l1b/*_l2a_rfl_*.img'))[-1]
+    return cover_file
+
 
 def lonlat_from_coords(coords):
     lons = np.array([x[0] for x in coords])
@@ -116,7 +125,7 @@ def read_from_bounds(ds, coords, buffer=50):
         dat = np.moveaxis(dat, 0, 2)
     else:
         dat = np.expand_dims(dat, 2)
-    return dat, x_off, y_off
+    return dat, (x_off, y_off, x_size, y_size)
 
 
 def read_raw_from_bounds(files, coords, buffer=50):
@@ -134,9 +143,8 @@ def add_mf(fids, coord_list, sourcedir):
     if len(fids) == 0:
         return 
     mf_files = [get_mf_ort_file(fid, sourcedir) for fid in fids]
-    print(mf_files)
     vrt_ds = gdal.BuildVRT('', mf_files)
-    dat, x_off, y_off = read_from_bounds(vrt_ds, coord_list)
+    dat, subset_info = read_from_bounds(vrt_ds, coord_list)
 
     #mf_files = sorted([get_mf_file(fid, sourcedir) for fid in fids])
     #rawspace_coords = multifile_rawspace_conversion([get_glt_file(x) for x in fids], coord_list)
@@ -150,7 +158,7 @@ def add_mf(fids, coord_list, sourcedir):
     plt.imshow(dat, vmin=0, vmax=1500, cmap='plasma')
     plt.colorbar()
     #plt.axis('off')
-    plot_plume(coord_list, x_off, y_off, vrt_ds.GetGeoTransform())
+    plot_plume(coord_list, subset_info[0], subset_info[1], vrt_ds.GetGeoTransform())
 
 
 def add_minerology(fids, coord_list, scratchdir, group='1'):
@@ -165,7 +173,7 @@ def add_minerology(fids, coord_list, scratchdir, group='1'):
         min_ort_files.append(min_ort_file)
     
     vrt_ds = gdal.BuildVRT('', min_ort_files)
-    dat, x_off, y_off = read_from_bounds(vrt_ds, coord_list)
+    dat, subset_info = read_from_bounds(vrt_ds, coord_list)
     if group == '1':
         min = dat[...,1]
     elif group == '2':
@@ -177,7 +185,7 @@ def add_minerology(fids, coord_list, scratchdir, group='1'):
     
     plt.imshow(col_min1)
     #plt.axis('off')
-    plot_plume(coord_list, x_off, y_off, vrt_ds.GetGeoTransform())
+    plot_plume(coord_list, subset_info[0], subset_info[1], vrt_ds.GetGeoTransform())
 
 
 def add_cover(fids, coord_list, scratchdir, group='1'):
@@ -192,15 +200,32 @@ def add_cover(fids, coord_list, scratchdir, group='1'):
         cover_ort_files.append(cover_ort_file)
     
     vrt_ds = gdal.BuildVRT('', cover_ort_files)
-    dat, x_off, y_off = read_from_bounds(vrt_ds, coord_list)
+    dat, subset_info = read_from_bounds(vrt_ds, coord_list)
+    dat = dat[...,:3]
 
     dat[dat < 0] = np.nan
-    dat = dat - np.nanpercentile(dat, 2, axis=(0,1))[np.newaxis,np.newaxis,:]
-    dat = dat / np.nanpercentile(dat, 98, axis=(0,1))[np.newaxis,np.newaxis,:]
+    #dat = dat - np.nanpercentile(dat, 2, axis=(0,1))[np.newaxis,np.newaxis,:]
+    #dat = dat / np.nanpercentile(dat, 98, axis=(0,1))[np.newaxis,np.newaxis,:]
     
     plt.imshow(dat)
     #plt.axis('off')
-    plot_plume(coord_list, x_off, y_off, vrt_ds.GetGeoTransform())
+    trans = vrt_ds.GetGeoTransform()
+    plot_plume(coord_list, subset_info[0], subset_info[1], trans)
+    return trans, subset_info
+
+
+
+def add_basemap(coords, subset_info, trans):
+
+    lons, lats = lonlat_from_coords(coords)
+    ul = [np.min(lats) - subset_info[1]*trans[5], np.min(lons) - subset_info[0]*trans[5]]
+    lr = [ul[0] + subset_info[3]*trans[5], ul[1] + subset_info[2]*trans[1]]
+    #ul = y,x
+    map = Basemap(llcrnrlon=ul[1], llcrnrlat=lr[0], urcrnrlon=lr[1], urcrnrlat=ul[0],
+            lat_0=trans[5], lon_0=trans[1], epsg=4326)
+    map.arcgisimage(xpixels=1500, verbose= True, alpha=0.5)
+
+
  
 
 def plot_plume(coords, x_off, y_off, trans):
@@ -215,8 +240,8 @@ def plot_plume(coords, x_off, y_off, trans):
 
 def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, outfile):
     with PdfPages(outfile) as pdf:
-        fig = plt.figure(figsize=(17, 22))
-        gs = fig.add_gridspec(6, 6, hspace=0.5, wspace=0.5)
+        fig = plt.figure(figsize=(17, 37))
+        gs = fig.add_gridspec(10, 6, hspace=0.5, wspace=0.5)
 
 
         loc_coords = plume_info['geometry']['coordinates'][0]
@@ -229,17 +254,16 @@ def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, out
         dt = pd.to_datetime(plume_info['properties']['Time Range Start']) - pd.Timedelta('1 minute')
         dts = dt.strftime('%Y-%m-%dT%H:%M:%SZ')
         subset_features = spatial_temporal_filter(coverage_df, coverage, Polygon(loc_coords), '2020-01-01T00:00:00Z', dts)
-        print(subset_features)
         subset_features = [subset_features[-1]] #todo - be more clever about this
         fids = [x['properties']['fid'] for x in subset_features]
         add_mf(fids, loc_coords, sourcedir)
-        plt.title('Previous MF; ' + fids[-1])
+        plt.title('Previous MF\n' + fids[-1].split('_')[0])
 
 
         # Current
         ax = fig.add_subplot(gs[0:2, 2:4])
         add_mf(plume_info['properties']['fids'], loc_coords, sourcedir)
-        plt.title('Current MF; ' + plume_info['properties']['fids'][0])
+        plt.title('Current MF\n' + plume_info['properties']['fids'][0].split('_')[0])
 
 
         # Future
@@ -250,7 +274,7 @@ def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, out
         subset_features = [subset_features[0]] #todo - be more clever about this
         fids = [x['properties']['fid'] for x in subset_features]
         add_mf(fids, loc_coords, sourcedir)
-        plt.title('Next MF; ' + fids[-1])
+        plt.title('Next MF\n' + fids[-1].split('_')[0])
 
 
         ################ Surface Features #########################
@@ -265,14 +289,72 @@ def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, out
 
         # fractional cover
         ax = fig.add_subplot(gs[2:4,4:6])
-        add_cover(plume_info['properties']['fids'], loc_coords, scratchdir, group='1')
+        trans, subset_info = add_cover(plume_info['properties']['fids'], loc_coords, scratchdir, group='1')
         plt.title('Fractional Cover')
 
+        ################## Reference imagery ###############################
+        ax = fig.add_subplot(gs[4:6,0:2])
+        add_basemap(loc_coords, subset_info, trans)
+        #plt.xlabel('Wavelength (nm)')
+        #plt.title('Radiance')
+        plt.title('Basemap Imagery')
+
+        ax = fig.add_subplot(gs[4:6,2:4])
+        plt.title('EMIT RGB')
+
+        ax = fig.add_subplot(gs[4:6,4:6])
+        plt.title('EMIT Cloudcover')
+
+        ax = fig.add_subplot(gs[6:8,0:2])
+        plt.title('MF Uncertainty')
+
+        ax = fig.add_subplot(gs[6:8,2:4])
+        plt.title('MF Sensitivity')
+
+        ax = fig.add_subplot(gs[6:8,4:6])
+        add_text(plume_info)
+        plt.title('Plume Info')
+
         # Add radiance and reflectance plots
+        ax = fig.add_subplot(gs[8:10,0:3])
+        plt.xlabel('Wavelength (nm)')
+        plt.title('Radiance')
+
+        ax = fig.add_subplot(gs[8:10,3:6])
+        plt.xlabel('Wavelength (nm)')
+        plt.title('Reflectance')
 
         pdf.savefig(bbox_inches='tight')
         plt.close()
 
+def add_text(plume_info):
+    plt.xlim([0,1])
+    plt.ylim([0,1])
+
+    plt.text(0.05, 0.95, f'Plume ID: {plume_info["properties"]["Plume ID"]}', fontsize=12)
+    plt.text(0.05, 0.90, f'Start Time: {plume_info["properties"]["Time Range Start"]}', fontsize=12)
+    plt.text(0.05, 0.85, f'End Time: {plume_info["properties"]["Time Range End"]}', fontsize=12)
+    plt.text(0.05, 0.80, f'Time Created: {plume_info["properties"]["Time Created"]}', fontsize=12)
+    plt.text(0.05, 0.75, f'Reviewer: {plume_info["properties"]["Created By"]}', fontsize=12)
+
+    txt = 'Unreviewed'
+    if plume_info["properties"]["R1 - Reviewed"]:
+        txt = 'R1 - Rejected'
+        if plume_info["properties"]["R1 - VISIONS"]:
+            txt = 'R1 - Accepted'
+    plt.text(0.05, 0.70, txt, fontsize=12)
+
+    txt = 'Unreviewed'
+    if plume_info["properties"]["R2 - Reviewed"]:
+        txt = 'R2 - Rejected'
+        if plume_info["properties"]["R2 - VISIONS"]:
+            txt = 'R2 - Accepted'
+    plt.text(0.05, 0.65, txt, fontsize=12)
+
+
+    plt.text(0.05, 0.60, f'R0 Confidence: {plume_info["properties"]["Confidence"]}', fontsize=12)
+    plt.text(0.05, 0.55, f'Sector: {plume_info["properties"]["Sector"]}', fontsize=12)
+    plt.axis('off')
 
 
 def main(input_args=None):
