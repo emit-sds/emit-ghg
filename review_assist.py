@@ -88,13 +88,27 @@ def get_cover_file(fid):
     cover_file = sorted(glob.glob(f'/beegfs/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid.split("_")[0]}/l3/*_l3_cover_*.img'))[-1]
     return cover_file
 
+
 def get_rdn_file(fid):
     cover_file = sorted(glob.glob(f'/beegfs/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid.split("_")[0]}/l1b/*_l1b_rdn_*.img'))[-1]
     return cover_file
 
+
 def get_ref_file(fid):
     cover_file = sorted(glob.glob(f'/beegfs/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid.split("_")[0]}/l1b/*_l2a_rfl_*.img'))[-1]
     return cover_file
+
+
+def get_mask_file(fid):
+    cover_file = sorted(glob.glob(f'/beegfs/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid.split("_")[0]}/l2a/*_l2a_mask_*.img'))[-1]
+    return cover_file
+
+
+def get_rgb_ort_file(fid):
+    rgb_file = sorted(glob.glob(f'/beegfs/scratch/brodrick/emit/emit-visuals/ortho/rgb_ql/{fid}_*.img'))[-1]
+    return rgb_file
+
+
 
 
 def lonlat_from_coords(coords):
@@ -155,7 +169,10 @@ def add_mf(fids, coord_list, sourcedir):
     #dat[dat > 1] = 1
     #dat[dat < 0] = 0
     #dat[dat == 0] = 0.01
-    plt.imshow(dat, vmin=0, vmax=1500, cmap='plasma')
+    dat[dat == -9999] = np.nan
+    cmap = plt.cm.plasma
+    cmap.set_bad(color='white')
+    plt.imshow(dat, vmin=0, vmax=1500, cmap=cmap)
     plt.colorbar()
     #plt.axis('off')
     plot_plume(coord_list, subset_info[0], subset_info[1], vrt_ds.GetGeoTransform())
@@ -212,6 +229,74 @@ def add_cover(fids, coord_list, scratchdir, group='1'):
     trans = vrt_ds.GetGeoTransform()
     plot_plume(coord_list, subset_info[0], subset_info[1], trans)
     return trans, subset_info
+
+
+def add_rgb(fids, coord_list, scratchdir):
+
+    rgb_ort_files = []
+    for fid in fids:
+        rgb_ort_files.append(get_rgb_ort_file(fid))
+    
+    vrt_ds = gdal.BuildVRT('', rgb_ort_files)
+    dat, subset_info = read_from_bounds(vrt_ds, coord_list)
+    dat = dat[...,:3]
+
+    plt.imshow(dat)
+    #plt.axis('off')
+
+    trans = vrt_ds.GetGeoTransform()
+    plot_plume(coord_list, subset_info[0], subset_info[1], trans)
+    return trans, subset_info
+
+
+def add_cloud(fids, coord_list, scratchdir, group='1'):
+
+    mask_ort_files = []
+    for fid in fids:
+        mask_ort_file = os.path.join(scratchdir, f"{fid}_mask_ort")
+        if os.path.isfile(mask_ort_file) is False:
+            glt_file = get_glt_file(fid)
+            mask_file = get_mask_file(fid)
+            apply_glt.main([glt_file, mask_file, mask_ort_file])
+        mask_ort_files.append(mask_ort_file)
+    
+    vrt_ds = gdal.BuildVRT('', mask_ort_files)
+    dat, subset_info = read_from_bounds(vrt_ds, coord_list)
+
+    od = np.zeros((dat.shape[0],dat.shape[1],3),dtype=np.uint8) + 255
+    od[dat[...,4] == 1] = np.array([150,150,150])[np.newaxis,np.newaxis,:]
+    od[dat[...,0] == 1] = np.array([255,1,1])[np.newaxis,np.newaxis,:]
+    od[dat[...,1] == 1] = np.array([1,255,1])[np.newaxis,np.newaxis,:]
+    od[dat[...,2] == 1] = np.array([1,1,255])[np.newaxis,np.newaxis,:]
+    #band names = { Cloud flag , Cirrus flag , Water flag , Spacecraft Flag , Dilated Cloud Flag , AOD550 , H2O (g cm-2) , Aggregate Flag }
+
+    plt.imshow(od)
+    #plt.axis('off')
+    trans = vrt_ds.GetGeoTransform()
+    plot_plume(coord_list, subset_info[0], subset_info[1], trans)
+    return trans, subset_info
+
+
+def add_radiance_plot(fids, coord_list, scratchdir, group='1'):
+
+    glt_files = []
+    for fid in fids:
+        glt_files.append(get_glt_file(fid))
+    
+    vrt_ds = gdal.BuildVRT('', glt_files)
+    dat, subset_info = read_from_bounds(vrt_ds, coord_list)
+
+    od = np.zeros((dat.shape[0],dat.shape[1],3),dtype=np.uint8) + 255
+    od[dat[...,4] == 1] = np.array([150,150,150])[np.newaxis,np.newaxis,:]
+    od[dat[...,0] == 1] = np.array([255,1,1])[np.newaxis,np.newaxis,:]
+    od[dat[...,1] == 1] = np.array([1,255,1])[np.newaxis,np.newaxis,:]
+    od[dat[...,2] == 1] = np.array([1,1,255])[np.newaxis,np.newaxis,:]
+    #band names = { Cloud flag , Cirrus flag , Water flag , Spacecraft Flag , Dilated Cloud Flag , AOD550 , H2O (g cm-2) , Aggregate Flag }
+
+
+    plt.xlabel('Wavelength (nm)')
+    return trans, subset_info
+
 
 
 
@@ -295,14 +380,14 @@ def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, out
         ################## Reference imagery ###############################
         ax = fig.add_subplot(gs[4:6,0:2])
         add_basemap(loc_coords, subset_info, trans)
-        #plt.xlabel('Wavelength (nm)')
-        #plt.title('Radiance')
         plt.title('Basemap Imagery')
 
         ax = fig.add_subplot(gs[4:6,2:4])
+        add_rgb(plume_info['properties']['fids'], loc_coords, scratchdir)
         plt.title('EMIT RGB')
 
         ax = fig.add_subplot(gs[4:6,4:6])
+        add_cloud(plume_info['properties']['fids'], loc_coords, scratchdir)
         plt.title('EMIT Cloudcover')
 
         ax = fig.add_subplot(gs[6:8,0:2])
@@ -317,7 +402,7 @@ def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, out
 
         # Add radiance and reflectance plots
         ax = fig.add_subplot(gs[8:10,0:3])
-        plt.xlabel('Wavelength (nm)')
+        add_radiance_plot(plume_info['properties']['fids'], loc_coords, scratchdir)
         plt.title('Radiance')
 
         ax = fig.add_subplot(gs[8:10,3:6])
