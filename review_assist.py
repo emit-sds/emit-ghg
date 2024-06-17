@@ -30,6 +30,8 @@ from shapely.geometry import Polygon
 import glob
 import apply_glt
 from mpl_toolkits.basemap import Basemap
+from rasterio.features import rasterize
+from spectral.io import envi
 
 
 def spatial_temporal_filter(cov_df, coverage, roi, start_time, end_time):
@@ -277,25 +279,40 @@ def add_cloud(fids, coord_list, scratchdir, group='1'):
     return trans, subset_info
 
 
-def add_radiance_plot(fids, coord_list, scratchdir, group='1'):
+def add_radiance_plot(fids, coord_list, scratchdir, num_points=5):
 
-    glt_files = []
-    for fid in fids:
-        glt_files.append(get_glt_file(fid))
+    glts = []
+    masks = []
+    plume_locs = [[],[],[]]
+    for _fid, fid in enumerate(fids):
+        ds = gdal.Open(get_glt_file(fid), gdal.GA_ReadOnly)
+        glt = ds.ReadAsArray().swapaxes(0,2)
+        trans = ds.GetGeoTransform()
+        atrans = [trans[1], trans[2], trans[0], trans[4], trans[5], trans[3]]
+        mask = rasterize(shapes=[Polygon(coord_list)], out_shape=(ds.RasterYSize, ds.RasterXSize), transform=atrans)
+        mask = np.logical_and(mask, glt[...,0] > 0)
+        masks.append(mask)
+        locs = np.where(mask)
+        plume_locs[0].extend(locs[0])
+        plume_locs[1].extend(locs[1])
+        plume_locs[2].extend((np.ones_like(locs[0])*_fid).tolist())
     
-    vrt_ds = gdal.BuildVRT('', glt_files)
-    dat, subset_info = read_from_bounds(vrt_ds, coord_list)
+    perm = np.random.permutation(len(plume_locs[0]))
+    plume_locs = [np.array(plume_locs[0])[perm], np.array(plume_locs[1])[perm], np.array(plume_locs[2])[perm]] 
+    order = np.argsort(plume_locs[2])
+    plume_locs = [plume_locs[0][order], plume_locs[1][order], plume_locs[2][order]]
 
-    od = np.zeros((dat.shape[0],dat.shape[1],3),dtype=np.uint8) + 255
-    od[dat[...,4] == 1] = np.array([150,150,150])[np.newaxis,np.newaxis,:]
-    od[dat[...,0] == 1] = np.array([255,1,1])[np.newaxis,np.newaxis,:]
-    od[dat[...,1] == 1] = np.array([1,255,1])[np.newaxis,np.newaxis,:]
-    od[dat[...,2] == 1] = np.array([1,1,255])[np.newaxis,np.newaxis,:]
-    #band names = { Cloud flag , Cirrus flag , Water flag , Spacecraft Flag , Dilated Cloud Flag , AOD550 , H2O (g cm-2) , Aggregate Flag }
+    ds = envi.open(get_rdn_file(fids[0]).replace('.img','.hdr'))
+    wl = np.array([float(x) for x in ds.metadata['wavelength']])   
 
-
+    for _pl in range(num_points):
+        loc = plume_locs[0][_pl], plume_locs[1][_pl]
+        for _fid, fid in enumerate(fids):
+            ds = gdal.Open(get_rdn_file(fid), gdal.GA_ReadOnly)
+            rdn = ds.ReadAsArray(plume_locs[0], plume_locs[1], 1, 1).squeeze()
+            plt.plot(wl, rdn)
+    
     plt.xlabel('Wavelength (nm)')
-    return trans, subset_info
 
 
 
@@ -324,6 +341,8 @@ def plot_plume(coords, x_off, y_off, trans):
     
 
 def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, outfile):
+
+    np.random.seed(13)
     with PdfPages(outfile) as pdf:
         fig = plt.figure(figsize=(17, 37))
         gs = fig.add_gridspec(10, 6, hspace=0.5, wspace=0.5)
