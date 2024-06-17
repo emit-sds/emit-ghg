@@ -96,8 +96,8 @@ def get_rdn_file(fid):
     return cover_file
 
 
-def get_ref_file(fid):
-    cover_file = sorted(glob.glob(f'/beegfs/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid.split("_")[0]}/l1b/*_l2a_rfl_*.img'))[-1]
+def get_rfl_file(fid):
+    cover_file = sorted(glob.glob(f'/beegfs/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid.split("_")[0]}/l2a/*_l2a_rfl_*.img'))[-1]
     return cover_file
 
 
@@ -138,7 +138,7 @@ def read_from_bounds(ds, coords, buffer=50):
 
     dat = ds.ReadAsArray(x_off, y_off, x_size, y_size)
     if len(dat.shape) == 3:
-        dat = np.moveaxis(dat, 0, 2)
+        dat = dat.transpose((1,2,0))
     else:
         dat = np.expand_dims(dat, 2)
     return dat, (x_off, y_off, x_size, y_size)
@@ -279,14 +279,14 @@ def add_cloud(fids, coord_list, scratchdir, group='1'):
     return trans, subset_info
 
 
-def add_radiance_plot(fids, coord_list, scratchdir, num_points=5):
+def get_rdn_rfl(fids, coord_list, scrachdir, num_points=5):
 
     glts = []
     masks = []
     plume_locs = [[],[],[]]
     for _fid, fid in enumerate(fids):
         ds = gdal.Open(get_glt_file(fid), gdal.GA_ReadOnly)
-        glt = ds.ReadAsArray().swapaxes(0,2)
+        glt = ds.ReadAsArray().transpose((1,2,0))
         trans = ds.GetGeoTransform()
         atrans = [trans[1], trans[2], trans[0], trans[4], trans[5], trans[3]]
         mask = rasterize(shapes=[Polygon(coord_list)], out_shape=(ds.RasterYSize, ds.RasterXSize), transform=atrans)
@@ -296,21 +296,110 @@ def add_radiance_plot(fids, coord_list, scratchdir, num_points=5):
         plume_locs[0].extend(locs[0])
         plume_locs[1].extend(locs[1])
         plume_locs[2].extend((np.ones_like(locs[0])*_fid).tolist())
+        glts.append(glt)
     
     perm = np.random.permutation(len(plume_locs[0]))
     plume_locs = [np.array(plume_locs[0])[perm], np.array(plume_locs[1])[perm], np.array(plume_locs[2])[perm]] 
     order = np.argsort(plume_locs[2])
-    plume_locs = [plume_locs[0][order], plume_locs[1][order], plume_locs[2][order]]
+    plume_locs = [plume_locs[0][order].astype(int), plume_locs[1][order].astype(int), plume_locs[2][order].astype(int)]
+
+    ds = envi.open(get_rdn_file(fids[0]).replace('.img','.hdr'))
+    wl = np.array([float(x) for x in ds.metadata['wavelength']])   
+
+    rdns, rfls = [], []
+    for _pl in range(num_points):
+        loc = plume_locs[0][_pl], plume_locs[1][_pl]
+        lglt = glts[plume_locs[2][_pl]][plume_locs[0][_pl], plume_locs[1][_pl],:].squeeze()
+
+        ds = gdal.Open(get_rdn_file(fids[plume_locs[2][_pl]]), gdal.GA_ReadOnly)
+        rdn = ds.ReadAsArray(int(lglt[0]), int(lglt[1]), int(1), int(1)).squeeze()
+
+        ds = gdal.Open(get_rfl_file(fids[plume_locs[2][_pl]]), gdal.GA_ReadOnly)
+        rfl = ds.ReadAsArray(int(lglt[0]), int(lglt[1]), int(1), int(1)).squeeze()
+
+        rdns.append(rdn)
+        rfls.append(rfl)
+    
+    return np.vstack(rdn).T, np.vstack(rfl).T, wl
+
+
+
+def add_radiance_plot(fids, coord_list, scratchdir, num_points=5):
+
+    glts = []
+    masks = []
+    plume_locs = [[],[],[]]
+    for _fid, fid in enumerate(fids):
+        ds = gdal.Open(get_glt_file(fid), gdal.GA_ReadOnly)
+        glt = ds.ReadAsArray().transpose((1,2,0))
+        trans = ds.GetGeoTransform()
+        atrans = [trans[1], trans[2], trans[0], trans[4], trans[5], trans[3]]
+        mask = rasterize(shapes=[Polygon(coord_list)], out_shape=(ds.RasterYSize, ds.RasterXSize), transform=atrans)
+        mask = np.logical_and(mask, glt[...,0] > 0)
+        masks.append(mask)
+        locs = np.where(mask)
+        plume_locs[0].extend(locs[0])
+        plume_locs[1].extend(locs[1])
+        plume_locs[2].extend((np.ones_like(locs[0])*_fid).tolist())
+        glts.append(glt)
+    
+    perm = np.random.permutation(len(plume_locs[0]))
+    plume_locs = [np.array(plume_locs[0])[perm], np.array(plume_locs[1])[perm], np.array(plume_locs[2])[perm]] 
+    order = np.argsort(plume_locs[2])
+    plume_locs = [plume_locs[0][order].astype(int), plume_locs[1][order].astype(int), plume_locs[2][order].astype(int)]
 
     ds = envi.open(get_rdn_file(fids[0]).replace('.img','.hdr'))
     wl = np.array([float(x) for x in ds.metadata['wavelength']])   
 
     for _pl in range(num_points):
         loc = plume_locs[0][_pl], plume_locs[1][_pl]
-        for _fid, fid in enumerate(fids):
-            ds = gdal.Open(get_rdn_file(fid), gdal.GA_ReadOnly)
-            rdn = ds.ReadAsArray(plume_locs[0], plume_locs[1], 1, 1).squeeze()
-            plt.plot(wl, rdn)
+        ds = gdal.Open(get_rdn_file(fids[plume_locs[2][_pl]]), gdal.GA_ReadOnly)
+        print(plume_locs[1][_pl], plume_locs[0][_pl], int(1), int(1))
+
+        lglt = glts[plume_locs[2][_pl]][plume_locs[0][_pl], plume_locs[1][_pl],:].squeeze()
+        rdn = ds.ReadAsArray(int(lglt[0]), int(lglt[1]), int(1), int(1)).squeeze()
+        #if np.all(rdn != -9999):
+        plt.plot(wl, rdn)
+    
+    plt.xlabel('Wavelength (nm)')
+
+
+
+def add_reflectance_plot(fids, coord_list, scratchdir, num_points=5):
+
+    glts = []
+    masks = []
+    plume_locs = [[],[],[]]
+    for _fid, fid in enumerate(fids):
+        ds = gdal.Open(get_glt_file(fid), gdal.GA_ReadOnly)
+        glt = ds.ReadAsArray().transpose((1,2,0))
+        trans = ds.GetGeoTransform()
+        atrans = [trans[1], trans[2], trans[0], trans[4], trans[5], trans[3]]
+        mask = rasterize(shapes=[Polygon(coord_list)], out_shape=(ds.RasterYSize, ds.RasterXSize), transform=atrans)
+        mask = np.logical_and(mask, glt[...,0] > 0)
+        masks.append(mask)
+        locs = np.where(mask)
+        plume_locs[0].extend(locs[0])
+        plume_locs[1].extend(locs[1])
+        plume_locs[2].extend((np.ones_like(locs[0])*_fid).tolist())
+        glts.append(glt)
+    
+    perm = np.random.permutation(len(plume_locs[0]))
+    plume_locs = [np.array(plume_locs[0])[perm], np.array(plume_locs[1])[perm], np.array(plume_locs[2])[perm]] 
+    order = np.argsort(plume_locs[2])
+    plume_locs = [plume_locs[0][order].astype(int), plume_locs[1][order].astype(int), plume_locs[2][order].astype(int)]
+
+    ds = envi.open(get_rfl_file(fids[0]).replace('.img','.hdr'))
+    wl = np.array([float(x) for x in ds.metadata['wavelength']])   
+
+    for _pl in range(num_points):
+        loc = plume_locs[0][_pl], plume_locs[1][_pl]
+        ds = gdal.Open(get_rfl_file(fids[plume_locs[2][_pl]]), gdal.GA_ReadOnly)
+        print(plume_locs[1][_pl], plume_locs[0][_pl], int(1), int(1))
+
+        lglt = glts[plume_locs[2][_pl]][plume_locs[0][_pl], plume_locs[1][_pl],:].squeeze()
+        rfl = ds.ReadAsArray(int(lglt[0]), int(lglt[1]), int(1), int(1)).squeeze()
+        plt.plot(wl, rfl)
     
     plt.xlabel('Wavelength (nm)')
 
@@ -359,9 +448,9 @@ def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, out
         dts = dt.strftime('%Y-%m-%dT%H:%M:%SZ')
         subset_features = spatial_temporal_filter(coverage_df, coverage, Polygon(loc_coords), '2020-01-01T00:00:00Z', dts)
         subset_features = [subset_features[-1]] #todo - be more clever about this
-        fids = [x['properties']['fid'] for x in subset_features]
-        add_mf(fids, loc_coords, sourcedir)
-        plt.title('Previous MF\n' + fids[-1].split('_')[0])
+        prev_fids = [x['properties']['fid'] for x in subset_features]
+        add_mf(prev_fids, loc_coords, sourcedir)
+        plt.title('Previous MF\n' + prev_fids[-1].split('_')[0])
 
 
         # Current
@@ -376,9 +465,9 @@ def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, out
         dts = dt.strftime('%Y-%m-%dT%H:%M:%SZ')
         subset_features = spatial_temporal_filter(coverage_df, coverage, Polygon(loc_coords), dts, '2040-01-01T00:00:00Z')
         subset_features = [subset_features[0]] #todo - be more clever about this
-        fids = [x['properties']['fid'] for x in subset_features]
-        add_mf(fids, loc_coords, sourcedir)
-        plt.title('Next MF\n' + fids[-1].split('_')[0])
+        next_fids = [x['properties']['fid'] for x in subset_features]
+        add_mf(next_fids, loc_coords, sourcedir)
+        plt.title('Next MF\n' + next_fids[-1].split('_')[0])
 
 
         ################ Surface Features #########################
@@ -420,12 +509,27 @@ def build_pdf_page(plume_info, coverage, coverage_df, sourcedir, scratchdir, out
         plt.title('Plume Info')
 
         # Add radiance and reflectance plots
+        cur_rdns, cur_rfls, wl = get_rdn_rfl(plume_info['properties']['fids'], loc_coords, scratchdir, num_points=10)
+        prev_rdns, prev_rfls, wl = get_rdn_rfl(prev_fids, loc_coords, scratchdir, num_points=10)
+        next_rdns, next_rfls, wl = get_rdn_rfl(next_fids, loc_coords, scratchdir, num_points=10)
+
         ax = fig.add_subplot(gs[8:10,0:3])
-        add_radiance_plot(plume_info['properties']['fids'], loc_coords, scratchdir)
+        #add_radiance_plot(plume_info['properties']['fids'], loc_coords, scratchdir)
+        plt.plot(wl, np.mean(cur_rdns,axis=0), c='black',label='current')
+        plt.plot(wl, np.mean(prev_rdns,axis=0), c='red',label='previous')
+        plt.plot(wl, np.mean(next_rdns,axis=0), c='green',label='future')
+        plt.xlabel('Wavelengths (nm)')
         plt.title('Radiance')
+        plt.legend()
 
         ax = fig.add_subplot(gs[8:10,3:6])
-        plt.xlabel('Wavelength (nm)')
+        plt.plot(wl, np.mean(cur_rfls,axis=0), c='black',label='current')
+        plt.plot(wl, np.mean(prev_rfls,axis=0), c='red',label='previous')
+        plt.plot(wl, np.mean(next_rfls,axis=0), c='green',label='future')
+        plt.xlabel('Wavelengths (nm)')
+        plt.legend()
+
+        #add_reflectance_plot(plume_info['properties']['fids'], loc_coords, scratchdir)
         plt.title('Reflectance')
 
         pdf.savefig(bbox_inches='tight')
