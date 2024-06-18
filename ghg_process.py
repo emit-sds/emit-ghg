@@ -121,6 +121,9 @@ def main(input_args=None):
     co2_mf_color_kmz_file = f'{args.output_base}_co2_mf_color.kmz'
     ch4_mf_color_kmz_file = f'{args.output_base}_ch4_mf_color.kmz'
 
+    # CH4 Sensitivity and Uncertainty
+    ch4_mf_sens_ort_file = f'{args.output_base}_ch4_mf_sensitivity_ort'
+    ch4_mf_uncert_ort_file = f'{args.output_base}_ch4_mf_uncert_ort'
     
     path = os.environ['PATH']
     path = path.replace('\Library\\bin;',':')
@@ -193,6 +196,10 @@ def main(input_args=None):
     if os.path.isfile(ch4_mf_ort_file) is False or args.overwrite:
         subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_file} {ch4_mf_ort_file}',shell=True)
     
+    if os.path.isfile(ch4_mf_sens_ort_file) is False or args.overwrite:
+        subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_sens_file} {ch4_mf_sens_ort_file}',shell=True)
+    if os.path.isfile(ch4_mf_uncert_ort_file) is False or args.overwrite:
+        subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_uncert_file} {ch4_mf_uncert_ort_file}',shell=True)
     
     #if os.path.isfile(ch4_mf_refined_scaled_ort_file) is False or args.overwrite:
     #    scale.main([ch4_mf_refined_ort_file, ch4_mf_refined_scaled_ort_file, '1', '500'])

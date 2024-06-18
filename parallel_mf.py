@@ -255,9 +255,9 @@ def main(input_args=None):
 
         write_bil_chunk(output_dat, args.output_file, ce, chunk_shape)
         if args.uncert_output_file is not None:
-            write_bil_chunk(output_uncert_dat, args.uncert_output_file, 0, chunk_shape)
+            write_bil_chunk(output_uncert_dat, args.uncert_output_file, ce, chunk_shape)
         if args.sens_output_file is not None:
-            write_bil_chunk(output_sens_dat, args.sens_output_file, 0, chunk_shape)
+            write_bil_chunk(output_sens_dat, args.sens_output_file, ce, chunk_shape)
         logging.info('Complete')
 
 
