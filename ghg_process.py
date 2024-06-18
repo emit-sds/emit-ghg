@@ -72,6 +72,16 @@ def main(input_args=None):
     co2_mf_file = f'{args.output_base}_co2_mf'
     ch4_mf_file = f'{args.output_base}_ch4_mf'
 
+    # Uncertainty
+    co2_mf_uncert_file = f'{args.output_base}_co2_mf_uncert'
+    ch4_mf_uncert_file = f'{args.output_base}_ch4_mf_uncert'
+
+    # Sensitivity
+    co2_mf_sens_file = f'{args.output_base}_co2_mf_sensitivity'
+    ch4_mf_sens_file = f'{args.output_base}_ch4_mf_sensitivity'
+
+    emit_noise_parameters_file = f'./instrument_noise_parameters/emit_noise.txt'
+
     # Flares
     flare_file = f'{args.output_base}_flares.json'
 
@@ -111,6 +121,9 @@ def main(input_args=None):
     co2_mf_color_kmz_file = f'{args.output_base}_co2_mf_color.kmz'
     ch4_mf_color_kmz_file = f'{args.output_base}_ch4_mf_color.kmz'
 
+    # CH4 Sensitivity and Uncertainty
+    ch4_mf_sens_ort_file = f'{args.output_base}_ch4_mf_sensitivity_ort'
+    ch4_mf_uncert_ort_file = f'{args.output_base}_ch4_mf_uncert_ort'
     
     path = os.environ['PATH']
     path = path.replace('\Library\\bin;',':')
@@ -148,14 +161,20 @@ def main(input_args=None):
 
 
     if (os.path.isfile(co2_mf_file) is False or args.overwrite) and args.co2:
-        subargs = [args.radiance_file, co2_target_file, co2_mf_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, '--wavelength_range', '1900', '2350', '--fixed_alpha', '0.0000000001', '--mask_clouds_water']
+        subargs = [args.radiance_file, co2_target_file, co2_mf_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, '--wavelength_range', '500', '1340', '1500', '1790', '1950', '2450', \
+                   '--fixed_alpha', '0.0000000001', '--mask_clouds_water', '--flare_outfile', flare_file, \
+                   '--noise_parameters_file', emit_noise_parameters_file, '--sens_output_file', co2_mf_sens_file, '--uncert_output_file', co2_mf_uncert_file]
         if args.ace_filter:
             subargs.append('--use_ace_filter')
         parallel_mf.main(subargs)
     
     if os.path.isfile(ch4_mf_file) is False or args.overwrite:
         logging.info('starting parallel mf')
-        subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, '--wavelength_range', '500', '2450', '--fixed_alpha', '0.0000000001', '--mask_clouds_water', '--flare_outfile', flare_file]
+        
+        subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, '--wavelength_range', '500', '1340', '1500', '1790', '1950', '2450', \
+                   '--fixed_alpha', '0.0000000001', '--mask_clouds_water', '--flare_outfile', flare_file, \
+                   '--noise_parameters_file', emit_noise_parameters_file, '--sens_output_file', ch4_mf_sens_file, '--uncert_output_file', ch4_mf_uncert_file]
+
         if args.mask_flares == 1:
             subargs.append('--mask_flares')
         if args.ace_filter:
@@ -177,6 +196,10 @@ def main(input_args=None):
     if os.path.isfile(ch4_mf_ort_file) is False or args.overwrite:
         subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_file} {ch4_mf_ort_file}',shell=True)
     
+    if os.path.isfile(ch4_mf_sens_ort_file) is False or args.overwrite:
+        subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_sens_file} {ch4_mf_sens_ort_file}',shell=True)
+    if os.path.isfile(ch4_mf_uncert_ort_file) is False or args.overwrite:
+        subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_uncert_file} {ch4_mf_uncert_ort_file}',shell=True)
     
     #if os.path.isfile(ch4_mf_refined_scaled_ort_file) is False or args.overwrite:
     #    scale.main([ch4_mf_refined_ort_file, ch4_mf_refined_scaled_ort_file, '1', '500'])
