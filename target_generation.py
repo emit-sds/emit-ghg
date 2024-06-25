@@ -133,32 +133,9 @@ def spline_5deg_lookup(grid_data, zenith=0, sensor=120, ground=0, water=0, conc=
             im, coordinates=coords_fractional_part, order=order, mode='nearest') for im in np.moveaxis(near_grid_data, 5, 0)])
     return lookup.squeeze()
 
-
-def load_ch4_dataset():
-    # filename = 'modtran_ch4_full/dataset_ch4_full.npz'
-    # correcthash = '6d2a7f0d566e5fd45221834b409d724a5397686a1686054f3d96e1f80e2d006d'
-    # import hashlib
-    # with open(filename, 'rb') as f:
-    #     filehash = hashlib.sha256(f.read()).hexdigest()
-    # if correcthash != filehash:
-    #     raise RuntimeError('Dataset file is invalid.')
-    # datafile = np.load(filename)
-    datafile = h5py.File('/beegfs/scratch/jchapman/CO2CH4TargetGen/dataset_ch4_full.hdf5', 'r', rdcc_nbytes=4194304)
-    return datafile['modtran_data'], datafile['modtran_param'], datafile['wave'], 'ch4'
-
-
-def load_co2_dataset():
-    # filename = 'modtran_co2_full/dataset_co2_full.npz'
-    # correcthash = 'b5ce28c2fc27c1713a6175ae61c8c4b7699a431b6d309a7121919e412d608527'
-    # import hashlib
-    # with open(filename, 'rb') as f:
-    #     filehash = hashlib.sha256(f.read()).hexdigest()
-    # if correcthash != filehash:
-    #     raise RuntimeError('Dataset file is invalid.')
-    # datafile = np.load(filename)
-    datafile = h5py.File('/beegfs/scratch/jchapman/CO2CH4TargetGen/dataset_co2_full.hdf5', 'r', rdcc_nbytes=4194304)
-    return datafile['modtran_data'], datafile['modtran_param'], datafile['wave'], 'co2'
-
+def load_ghg_dataset(ghg_hdf):
+    datafile = h5py.File(ghg_hdf, 'r', rdcc_nbytes=4194304)
+    return datafile['modtran_data'], datafile['modtran_param'], datafile['wave']
 
 def load_pca_dataset():
     filename = 'modtran_ch4_full/dataset_ch4_pca.npz'
@@ -176,17 +153,15 @@ def load_pca_dataset():
         parameters.shape[:-1] + wavelengths.shape)
     return simulation_spectra, parameters, wavelengths, 'ch4'
 
-
-def generate_library(gas_concentration_vals, zenith=0, sensor=120, ground=0, water=0, order=1, dataset_fcn=load_ch4_dataset):
-    grid, params, wave, gas = dataset_fcn()
+def generate_library(gas_concentration_vals, dataset, gas, zenith=0, sensor=120, ground=0, water=0, order=1):
+    grid, params, wave = load_ghg_dataset(dataset)
     rads = np.empty((len(gas_concentration_vals), grid.shape[-1]))
     for i, ppmm in enumerate(gas_concentration_vals):
         rads[i, :] = spline_5deg_lookup(
             grid, zenith=zenith, sensor=sensor, ground=ground, water=water, conc=ppmm, gas=gas, order=order)
     return rads, wave
 
-
-def generate_template_from_bands(centers, fwhm, params, dataset_loader, **kwargs):
+def generate_template_from_bands(centers, fwhm, params, dataset, gas, **kwargs):
     """Calculate a unit absorption spectrum for methane by convolving with given band information.
 
     :param centers: wavelength values for the band centers, provided in nanometers.
@@ -207,13 +182,16 @@ def generate_template_from_bands(centers, fwhm, params, dataset_loader, **kwargs
 #                                 os.path.join(os.path.dirname(os.path.abspath(__file__)), 'ch4.lut'))
 #     rads = np.asarray(lib.asarray()).squeeze()
 #     wave = np.asarray(lib.bands.centers)
+
     # Ignore None, better if it had just not been passed
     if 'concentrations' in kwargs and kwargs['concentrations'] is None:
         kwargs.pop('concentrations')
     concentrations = np.asarray(kwargs.get(
         'concentrations', [0.0, 1000, 2000, 4000, 8000, 16000, 32000, 64000]))
-    rads, wave = generate_library(
-        concentrations, dataset_fcn=dataset_loader, **params)
+    rads, wave = generate_library(concentrations,
+                                  dataset,
+                                  gas,
+                                  **params)
     # sigma = fwhm / ( 2 * sqrt( 2 * ln(2) ) )  ~=  fwhm / 2.355
     sigma = fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
     # response = scipy.stats.norm.pdf(wave[:, None], loc=centers[None, :], scale=sigma[None, :])
@@ -247,6 +225,7 @@ def main(input_args=None):
                         required=True, help='Ground Elevation (in km).')
     parser.add_argument('-w', '--water_vapor', type=float,
                         required=True, help='Column water vapor (in cm).')
+    parser.add_argument('-l','--lut_dataset', type=str, required=True, help='GHG LUT path.')
     parser.add_argument('--order', choices=(1, 3), default=1,
                         type=int, required=False, help='Spline interpolation degree.')
     gas = parser.add_mutually_exclusive_group(required=False)
@@ -283,16 +262,18 @@ def main(input_args=None):
         raise RuntimeError(
             'Failed to load band centers and fwhm from file. Check that the specified file exists.')
     concentrations = args.concentrations
-    if 'ch4' in args.gas:
-        dataset_fcn = load_ch4_dataset if 'full' in args.source else load_pca_dataset
-    elif 'co2' in args.gas:
-        dataset_fcn = load_co2_dataset
-    uas = generate_template_from_bands(centers, fwhm, param,
-                                       concentrations=concentrations, dataset_loader=dataset_fcn)
+
+    uas = generate_template_from_bands(centers,
+                                       fwhm,
+                                       param,
+                                       concentrations=concentrations,
+                                       dataset=args.lut_dataset,
+                                       gas = args.gas)
+
+
     np.savetxt(args.output, uas, delimiter=' ',
                fmt=('%03d', '% 10.3f', '%.18f'))
 
 
 if __name__ == '__main__':
     main()
-
