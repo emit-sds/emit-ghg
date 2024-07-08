@@ -127,11 +127,11 @@ def main(input_args=None):
 
     if (os.path.isfile(co2_target_file) is False and args.co2) or args.overwrite or os.path.isfile(ch4_target_file) is False:
         #sza = envi.open(obs_file_hdr).open_memmap(interleave='bip')[...,4]
-        sza = ReadAbstractDataSet(args.obs_file, netcdf_key = 'obs', interleave = 'bip')[...,4]
+        sza = ReadAbstractDataSet(args.obs_file, netcdf_key = 'obs', envi_interleave = 'bip')[...,4]
         mean_sza = np.mean(sza[sza != -9999])
 
         if args.loc_file[-3:] == '.nc':
-            elevation = ReadAbstractDataSet(args.radiance_file, netcdf_group = 'location', netcdf_key = 'elev', interleave = 'bip')
+            elevation = ReadAbstractDataSet(args.radiance_file, netcdf_group = 'location', netcdf_key = 'elev', envi_interleave = 'bip')
         else:
             elevation = envi.open(loc_file_hdr).open_memmap(interleave='bip')[...,2]
 
