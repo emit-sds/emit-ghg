@@ -79,11 +79,13 @@ class SerialEncoder(json.JSONEncoder):
             return super(SerialEncoder, self).default(obj)
 
 class ReadAbstractDataSet():
-    def __init__(self, filename):
+    def __init__(self, filename, netcdf_group = None, netcdf_key = None):
         self.filename = filename
         
         if filename[-3:] == '.nc':
             self.filetype = 'netCDF4'
+            if netcdf_key is None:
+                raise ValueError(f'Keyword netcdf_key must be provided for nedCDF4 files.')
         elif os.path.exists(envi_header(filename)):
             self.filetype = 'ENVI'
         else:
@@ -94,23 +96,31 @@ class ReadAbstractDataSet():
             self.memmap = self.ds.open_memmap(interleave='bil',writeable=False)
             self.metadata = self.ds.metadata
 
-            if 'wavelength' not in self.ds.metadata:
-                logging.error('wavelength field not found in input header')
-                sys.exit(0)
-            wavelengths = np.array([float(x) for x in self.ds.metadata['wavelength']])
-            fwhm = np.array([float(x) for x in self.ds.metadata['fwhm']])
+            wavelengths = None
+            fwhm = None
+            if 'wavelength' in self.ds.metadata:
+                wavelengths = np.array([float(x) for x in self.ds.metadata['wavelength']])
+                fwhm = np.array([float(x) for x in self.ds.metadata['fwhm']])
             self.metadata['wavelength'] = wavelengths
             self.metadata['fwhm'] = fwhm
         
         if self.filetype == 'netCDF4':
             import xarray as xr 
-            self.ds = xr.open_dataset(self.filename, engine = 'netcdf4')
-            wvl = xr.open_dataset(self.filename, engine = 'netcdf4', group = 'sensor_band_parameters')
-            self.radiance = np.ascontiguousarray(np.transpose(self.ds['radiance'].values, [0,2,1]))
-            l, b, s = self.radiance.shape
+            self.ds = xr.open_dataset(self.filename, engine = 'netcdf4', group = netcdf_group)
 
-            self.metadata = {'wavelength': wvl['wavelengths'].values,
-                             'fwhm': wvl['fwhm'].values,
+            self.data = np.ascontiguousarray(np.transpose(self.ds[netcdf_key].values, [0,2,1]))
+            l, b, s = self.data.shape
+
+            wvl = xr.open_dataset(self.filename, engine = 'netcdf4', group = 'sensor_band_parameters')
+            try:
+                wavelengths = wvl['wavelengths'].values
+                fwhm = wvl['fwhm'].values
+            except:
+                wavelengths = None
+                fwhm = None
+
+            self.metadata = {'wavelength': wavelengths,
+                             'fwhm': fwhm,
                              'bands': b,
                              'lines': l,
                              'samples': s,
@@ -125,7 +135,7 @@ class ReadAbstractDataSet():
         if self.filetype == 'ENVI':
             return self.memmap[key]
         if self.filetype == 'netCDF4':
-            return self.radiance[key]
+            return self.data[key]
 
 class WriteAbstractDataSet():
     def __init__(self, filename, outmeta = None):
