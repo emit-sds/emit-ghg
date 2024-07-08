@@ -79,21 +79,31 @@ class SerialEncoder(json.JSONEncoder):
             return super(SerialEncoder, self).default(obj)
 
 class ReadAbstractDataSet():
-    def __init__(self, filename, netcdf_group = None, netcdf_key = None):
+    """Wrapper class to enable reading from multiple input data types. Currently supports ENVI and netCDF4.
+    netCDF4 is assumed if the file ends in .nc, otherwise it is assumed to be ENVI
+    The netcdf_ inputs are used when the input file is netCDF4 and the envi_ inputs are used when it is ENVI.
+
+    In order to be consistent with ENVI, the radiance data from netCDF4 files is transposed so that it matches
+    the radiance data read from ENVI.
+    """
+    def __init__(self, filename, netcdf_group = None, netcdf_key = None, envi_interleave = None):
         self.filename = filename
         
+        # Determine the file type: ENVI or netCDF4
         if filename[-3:] == '.nc':
             self.filetype = 'netCDF4'
             if netcdf_key is None:
-                raise ValueError(f'Keyword netcdf_key must be provided for nedCDF4 files.')
+                raise ValueError(f'Keyword netcdf_key must be provided for netCDF4 files.')
         elif os.path.exists(envi_header(filename)):
             self.filetype = 'ENVI'
+            if envi_interleave is None:
+                raise ValueError(f'Keyword envi_interleave must be provided for ENVI files.')
         else:
             raise ValueError(f'File type of {filename} not recognized.')
         
         if self.filetype == 'ENVI':
             self.ds = envi.open(envi_header(filename), image = filename)
-            self.memmap = self.ds.open_memmap(interleave='bil',writeable=False)
+            self.memmap = self.ds.open_memmap(interleave=envi_interleave,writeable=False)
             self.metadata = self.ds.metadata
 
             wavelengths = None
@@ -108,8 +118,17 @@ class ReadAbstractDataSet():
             import xarray as xr 
             self.ds = xr.open_dataset(self.filename, engine = 'netcdf4', group = netcdf_group)
 
-            self.data = np.ascontiguousarray(np.transpose(self.ds[netcdf_key].values, [0,2,1]))
-            l, b, s = self.data.shape
+            self.data = self.ds[netcdf_key].values
+            
+            # Transpose the radiance to match the way ENVI reads it in
+            if netcdf_key == 'radiance':
+                self.data = np.ascontiguousarray(np.transpose(self.data, [0,2,1]))
+            
+            if len(self.data.shape) == 3:
+                l, b, s = self.data.shape
+            else:
+                l, b = self.data.shape
+                s = 0
 
             wvl = xr.open_dataset(self.filename, engine = 'netcdf4', group = 'sensor_band_parameters')
             try:
@@ -130,7 +149,6 @@ class ReadAbstractDataSet():
                              'sensor type': 'unknown',
                              'band names': [f'channel_{x:d}' for x in range(b)]}
 
-    
     def __getitem__(self, key):
         if self.filetype == 'ENVI':
             return self.memmap[key]
@@ -138,6 +156,8 @@ class ReadAbstractDataSet():
             return self.data[key]
 
 class WriteAbstractDataSet():
+    """Wrapper class to write to arbitrary output file formats. Currenlty only supports ENVI.
+    """
     def __init__(self, filename, outmeta = None):
         self.filename = filename
         
