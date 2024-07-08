@@ -78,7 +78,7 @@ def main(input_args=None):
    
     
     logging.info('Started processing input file: "%s"'%str(args.radiance_file))
-    ds = ReadAbstractDataSet(args.radiance_file)
+    ds = ReadAbstractDataSet(args.radiance_file, netcdf_key = 'radiance')
     wavelengths = np.array([float(x) for x in ds.metadata['wavelength']])
 
     if args.wavelength_range is None:
@@ -171,7 +171,11 @@ def main(input_args=None):
         logging.debug("adding cloud / water mask")
         clouds_and_surface_water_mask = None
         if args.l2a_mask_file is not None:
-            clouds_and_surface_water_mask = np.sum(envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')[ce:chunk_edges[_ce+1],:,:3],axis=-1) > 0
+            #clouds_and_surface_water_mask = np.sum(envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')[ce:chunk_edges[_ce+1],:,:3],axis=-1) > 0
+            masks = ReadAbstractDataSet(args.l2a_mask_file)[...]
+            if masks.shape[1] == 8:
+                masks = masks.transpose((0,2,1))
+            clouds_and_surface_water_mask = np.sum(masks[ce:chunk_edges[_ce+1],:,:3],axis=-1) > 0
             good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
 
         logging.info('initializing ray, adding data to shared memory')
@@ -363,10 +367,14 @@ def calculate_saturation_mask(bandmask_file: str, radiance: np.array, dilation_i
     excludes them.'''
 
     if chunk_edges is None:
-        l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[:,:,:]
+        #l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[:,:,:]
+        l1b_bandmask_loaded = ReadAbstractDataSet(bandmask_file, netcdf_key = 'band_mask')[:,:,:].astype(np.uint8)
     else:
-        l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[chunk_edges[0]:chunk_edges[1],:,:]
+        #l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[chunk_edges[0]:chunk_edges[1],:,:]
+        l1b_bandmask_loaded = ReadAbstractDataSet(bandmask_file, netcdf_key = 'band_mask')[chunk_edges[0]:chunk_edges[1],:,:].astype(np.uint8)
 
+    if np.argmin(l1b_bandmask_loaded.shape) == 1:
+        l1b_bandmask_loaded = l1b_bandmask_loaded.transpose((0,2,1))
     bad9999 = np.any(radiance < -1, axis = 1)
     l1b_bandmask_unpacked = np.unpackbits(l1b_bandmask_loaded, axis= -1)
     l1b_bandmask_summed = np.sum(l1b_bandmask_unpacked, axis = -1)

@@ -275,7 +275,7 @@ def main(input_args=None):
              'water': args.water_vapor,
              'order': args.order}
     if args.hdr and exists(args.hdr):
-        ds = ReadAbstractDataSet(args.hdr)
+        ds = ReadAbstractDataSet(args.hdr, netcdf_key = 'radiance')
         centers = ds.metadata['wavelength']
         fwhm = ds.metadata['fwhm']
     elif args.txt and exists(args.txt):
