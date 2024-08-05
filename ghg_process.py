@@ -27,8 +27,10 @@ import logging
 from spectral.io import envi
 import numpy as np
 import os
-from utils import envi_header
+from utils import envi_header, ReadAbstractDataSet
 from osgeo import gdal
+
+import pdb
 
 
 
@@ -54,6 +56,8 @@ def main(input_args=None):
 
     radiance_file = args.radiance_file
     radiance_file_hdr = envi_header(radiance_file)
+    if radiance_file[-3:] == '.nc':
+        radiance_file_hdr = radiance_file
  
     obs_file = args.obs_file
     obs_file_hdr = envi_header(obs_file)
@@ -122,17 +126,27 @@ def main(input_args=None):
             subprocess.call(f'rm {args.output_base}_ch4*',shell=True)
 
     if (os.path.isfile(co2_target_file) is False and args.co2) or args.overwrite or os.path.isfile(ch4_target_file) is False:
-        sza = envi.open(obs_file_hdr).open_memmap(interleave='bip')[...,4]
+        #sza = envi.open(obs_file_hdr).open_memmap(interleave='bip')[...,4]
+        sza = ReadAbstractDataSet(args.obs_file, netcdf_key = 'obs', envi_interleave = 'bip')[...,4]
         mean_sza = np.mean(sza[sza != -9999])
 
-        elevation = envi.open(loc_file_hdr).open_memmap(interleave='bip')[...,2]
+        if args.loc_file[-3:] == '.nc':
+            elevation = ReadAbstractDataSet(args.radiance_file, netcdf_group = 'location', netcdf_key = 'elev', envi_interleave = 'bip')
+        else:
+            elevation = envi.open(loc_file_hdr).open_memmap(interleave='bip')[...,2]
+
         mean_elevation = np.mean(elevation[elevation != -9999]) / 1000.
         mean_elevation = min(max(0, mean_elevation),3)
 
         if args.state_subs is not None:
-            state_ds = envi.open(envi_header(args.state_subs))
-            band_names = state_ds.metadata['band names']
-            h2o = state_ds.open_memmap(interleave='bip')[...,band_names.index('H2OSTR')]
+
+            if args.state_subs[-3:] == '.nc':
+                h2o = ReadAbstractDataSet(args.l2a_mask_file, netcdf_key = 'mask')[:,:,6]
+            else:
+                state_ds = envi.open(envi_header(args.state_subs))
+                band_names = state_ds.metadata['band names']
+                h2o = state_ds.open_memmap(interleave='bip')[...,band_names.index('H2OSTR')]
+
             mean_h2o = np.mean(h2o[h2o != -9999])
         else:
             # Just guess something...

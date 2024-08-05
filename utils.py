@@ -16,9 +16,12 @@
 #
 # Authors: Philip G. Brodrick, philip.brodrick@jpl.nasa.gov
 
+from spectral.io import envi
+
 import os
 import numpy as np
 import json
+import pdb
 
 def envi_header(inputpath):
     """
@@ -75,3 +78,100 @@ class SerialEncoder(json.JSONEncoder):
         else:
             return super(SerialEncoder, self).default(obj)
 
+class ReadAbstractDataSet():
+    """Wrapper class to enable reading from multiple input data types. Currently supports ENVI and netCDF4.
+    netCDF4 is assumed if the file ends in .nc, otherwise it is assumed to be ENVI
+    The netcdf_ inputs are used when the input file is netCDF4 and the envi_ inputs are used when it is ENVI.
+
+    In order to be consistent with ENVI, the radiance data from netCDF4 files is transposed so that it matches
+    the radiance data read from ENVI.
+    """
+    def __init__(self, filename, netcdf_group = None, netcdf_key = None, envi_interleave = None):
+        self.filename = filename
+        
+        # Determine the file type: ENVI or netCDF4
+        if filename[-3:] == '.nc':
+            self.filetype = 'netCDF4'
+            if netcdf_key is None:
+                raise ValueError(f'Keyword netcdf_key must be provided for netCDF4 files.')
+        elif os.path.exists(envi_header(filename)):
+            self.filetype = 'ENVI'
+            if envi_interleave is None:
+                raise ValueError(f'Keyword envi_interleave must be provided for ENVI files.')
+        else:
+            raise ValueError(f'File type of {filename} not recognized.')
+        
+        if self.filetype == 'ENVI':
+            self.ds = envi.open(envi_header(filename), image = filename)
+            self.memmap = self.ds.open_memmap(interleave=envi_interleave,writeable=False)
+            self.metadata = self.ds.metadata
+
+            wavelengths = None
+            fwhm = None
+            if 'wavelength' in self.ds.metadata:
+                wavelengths = np.array([float(x) for x in self.ds.metadata['wavelength']])
+                fwhm = np.array([float(x) for x in self.ds.metadata['fwhm']])
+            self.metadata['wavelength'] = wavelengths
+            self.metadata['fwhm'] = fwhm
+        
+        if self.filetype == 'netCDF4':
+            import xarray as xr 
+            self.ds = xr.open_dataset(self.filename, engine = 'netcdf4', group = netcdf_group)
+
+            self.data = self.ds[netcdf_key].values
+            
+            # Transpose the radiance to match the way ENVI reads it in
+            if netcdf_key == 'radiance':
+                self.data = np.ascontiguousarray(np.transpose(self.data, [0,2,1]))
+            
+            if len(self.data.shape) == 3:
+                l, b, s = self.data.shape
+            else:
+                l, b = self.data.shape
+                s = 0
+
+            wvl = xr.open_dataset(self.filename, engine = 'netcdf4', group = 'sensor_band_parameters')
+            try:
+                wavelengths = wvl['wavelengths'].values
+                fwhm = wvl['fwhm'].values
+            except:
+                wavelengths = None
+                fwhm = None
+
+            self.metadata = {'wavelength': wavelengths,
+                             'fwhm': fwhm,
+                             'bands': b,
+                             'lines': l,
+                             'samples': s,
+                             'byte order': 0,
+                             'header offset': 0,
+                             'file_type': 'ENVI Standard',
+                             'sensor type': 'unknown',
+                             'band names': [f'channel_{x:d}' for x in range(b)]}
+
+    def __getitem__(self, key):
+        if self.filetype == 'ENVI':
+            return self.memmap[key]
+        if self.filetype == 'netCDF4':
+            return self.data[key]
+
+class WriteAbstractDataSet():
+    """Wrapper class to write to arbitrary output file formats. Currenlty only supports ENVI.
+    """
+    def __init__(self, filename, outmeta = None):
+        self.filename = filename
+        
+        if filename[-3:] == '.nc':
+            self.filetype = 'netCDF4'
+            raise NotImplementedError(f'Writing netCDF4 files is not supported')
+        else:
+            self.filetype = 'ENVI'
+        
+        if self.filetype == 'ENVI':
+            ds = envi.create_image(envi_header(filename), outmeta, force = True, ext = '')
+            del ds
+    
+    def write(self, *input_tuple):
+        data, line, shape = input_tuple
+        if self.filetype == 'ENVI':
+            write_bil_chunk(data, self.filename, line, shape)
