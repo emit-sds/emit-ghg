@@ -218,13 +218,15 @@ def main(input_args=None):
 
         logging.info('Collecting and writing output')
         output_dat = np.zeros(chunk_shape,dtype=np.float32)
-        output_uncert_dat = np.zeros(chunk_shape,dtype=np.float32)
-        output_sens_dat = np.zeros(chunk_shape,dtype=np.float32)
+        output_uncert_dat = np.ones(chunk_shape,dtype=np.float32) * args.nodata_value
+        output_sens_dat = np.ones(chunk_shape,dtype=np.float32) * args.nodata_value
         for ret in rreturn:
             if ret[0] is not None:
                 output_dat[:, 0, ret[1]] = ret[0][:,0]
-                output_uncert_dat[:, 0, ret[1]] = ret[2][:]
-                output_sens_dat[:, 0, ret[1]] = ret[3][:]
+                if ret[2] is not None:
+                    output_uncert_dat[:, 0, ret[1]] = ret[2][:]
+                if ret[3] is not None:
+                    output_sens_dat[:, 0, ret[1]] = ret[3][:]
 
         def apply_badvalue(d, mask, bad_data_value):
             d = d.transpose((0,2,1))
@@ -549,8 +551,10 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
         sens[np.logical_not(no_radiance_mask)] = args.nodata_value
         sens[np.logical_not(np.isfinite(uncert))] = args.nodata_value
     else:
-        uncert = np.ones(rdn.shape[0]) * args.nodata_value
-        sens = np.ones(rdn.shape[0]) * args.nodata_value
+        #uncert = np.ones(rdn.shape[0]) * args.nodata_value
+        #sens = np.ones(rdn.shape[0]) * args.nodata_value
+        uncert = None
+        sens = None
         
     logging.debug(f'Column {col} mean: {np.mean(output[good_pixel_idx,0])}')
     return output.astype(np.float32), col, uncert, sens
