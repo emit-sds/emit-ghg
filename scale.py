@@ -43,7 +43,7 @@ def main(input_args=None):
     parser.add_argument('input_file', type=str,  metavar='INPUT', help='path to input image')   
     parser.add_argument('output_file', type=str,  metavar='OUTPUT', help='path to input image')   
     parser.add_argument('bounds', type=float,  nargs=2, metavar='SCALING RANGE', help='path to input image')   
-    parser.add_argument('--cmap', type=str,  default=None, choices=['plasma','YlOrRd', 'viridis'], metavar='COLOR_SCALE', help='color scale to apply')   
+    parser.add_argument('--cmap', type=str,  default=None, choices=['plasma','YlOrRd', 'viridis', 'RdBu_r'], metavar='COLOR_SCALE', help='color scale to apply')   
     args = parser.parse_args(input_args)
 
 
@@ -76,6 +76,8 @@ def main(input_args=None):
             dat = plt.cm.YlOrRd(dat)[...,:3]
         elif args.cmap == 'viridis':
             dat = plt.cm.viridis(dat)[...,:3]
+        elif args.cmap == 'RdBu_r':
+            dat = plt.cm.RdBu_r(dat)[...,:3]
         dat = np.round(dat * 255).astype(np.uint8)
         dat[np.logical_not(mask),:] = np.maximum(1, dat[np.logical_not(mask),:])
         dat[isnan,:] = 0

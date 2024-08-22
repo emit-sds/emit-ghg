@@ -72,6 +72,16 @@ def main(input_args=None):
     co2_mf_file = f'{args.output_base}_co2_mf'
     ch4_mf_file = f'{args.output_base}_ch4_mf'
 
+    # Uncertainty
+    co2_mf_uncert_file = f'{args.output_base}_co2_mf_uncert'
+    ch4_mf_uncert_file = f'{args.output_base}_ch4_mf_uncert'
+
+    # Sensitivity
+    co2_mf_sens_file = f'{args.output_base}_co2_sens'
+    ch4_mf_sens_file = f'{args.output_base}_ch4_sens'
+
+    emit_noise_parameters_file = f'./instrument_noise_parameters/emit_noise.txt'
+
     # Flares
     flare_file = f'{args.output_base}_flares.json'
 
@@ -79,38 +89,27 @@ def main(input_args=None):
     co2_mf_ort_file = f'{args.output_base}_co2_mf_ort'
     ch4_mf_ort_file = f'{args.output_base}_ch4_mf_ort'
 
-    # MF - Refined
-    co2_mf_refined_file = f'{args.output_base}_co2_mf_refined'
-    ch4_mf_refined_file = f'{args.output_base}_ch4_mf_refined'
-
-    # MF - Refined - ORT
-    co2_mf_refined_ort_file = f'{args.output_base}_co2_mf_refined_ort'
-    ch4_mf_refined_ort_file = f'{args.output_base}_ch4_mf_refined_ort'
-    
-    # MF - Refined - ORT - Scaled
-    co2_mf_refined_scaled_ort_file = f'{args.output_base}_co2_mf_refined_scaled_ort.tif'
-    ch4_mf_refined_scaled_ort_file = f'{args.output_base}_ch4_mf_refined_scaled_ort.tif' ### CHANGE THIS NAME TO ch4_mf_refined_scaled_ort.tif
-
     # MF -  ORT - Scaled Color
     ch4_mf_scaled_color_ort_file = f'{args.output_base}_ch4_mf_scaled_color_ort.tif'  
     co2_mf_scaled_color_ort_file = f'{args.output_base}_co2_mf_scaled_color_ort.tif'
 
-    # MF -  Refined - ORT - Scaled Color
-    ch4_mf_refined_scaled_color_ort_file = f'{args.output_base}_ch4_mf_refined_scaled_color_ort.tif'
-    co2_mf_refined_scaled_color_ort_file = f'{args.output_base}_co2_mf_refined_scaled_color_ort.tif'
 
-    co2_mf_refined_kmz_file = f'{args.output_base}_co2_mf_refined.kmz'
-    ch4_mf_refined_kmz_file = f'{args.output_base}_ch4_mf_refined.kmz'
+    # Sensitivity ort
+    co2_sens_ort_file = f'{args.output_base}_co2_sens_ort'
+    ch4_sens_ort_file = f'{args.output_base}_ch4_sens_ort'
 
-    co2_mf_refined_color_kmz_file = f'{args.output_base}_co2_mf_refined_color.kmz'
-    ch4_mf_refined_color_kmz_file = f'{args.output_base}_ch4_mf_refined_color.kmz'
+    # Sensitivity -  ORT - Scaled Color
+    co2_sens_scaled_color_ort_file = f'{args.output_base}_co2_sens_scaled_color_ort.tif'  
+    ch4_sens_scaled_color_ort_file = f'{args.output_base}_ch4_sens_scaled_color_ort.tif'  
 
-    co2_mf_kmz_file = f'{args.output_base}_co2_mf.kmz'
-    ch4_mf_kmz_file = f'{args.output_base}_ch4_mf.kmz'
 
-    co2_mf_color_kmz_file = f'{args.output_base}_co2_mf_color.kmz'
-    ch4_mf_color_kmz_file = f'{args.output_base}_ch4_mf_color.kmz'
+    # Uncertainty ort
+    ch4_uncert_ort_file = f'{args.output_base}_ch4_uncert_ort'
+    co2_uncert_ort_file = f'{args.output_base}_co2_uncert_ort'
 
+    # Uncertainty -  ORT - Scaled Color
+    co2_uncert_scaled_color_ort_file = f'{args.output_base}_co2_uncert_scaled_color_ort.tif'
+    ch4_uncert_scaled_color_ort_file = f'{args.output_base}_ch4_uncert_scaled_color_ort.tif'
     
     path = os.environ['PATH']
     path = path.replace('\Library\\bin;',':')
@@ -142,99 +141,104 @@ def main(input_args=None):
 
 
     if (os.path.isfile(co2_target_file) is False or args.overwrite) and args.co2:
-        target_generation.main(['--co2', '-z', str(mean_sza), '-s', '100', '-g', str(mean_elevation), '-w', str(mean_h2o), '--output', co2_target_file, '--hdr', radiance_file_hdr])
+        target_generation.main(['--co2', 
+                                '-z', str(mean_sza), 
+                                '-s', '100', 
+                                '-g', str(mean_elevation), 
+                                '-w', str(mean_h2o), 
+                                '--output', co2_target_file, 
+                                '--hdr', radiance_file_hdr,
+                                '--lut_dataset', '/beegfs/scratch/jchapman/CO2CH4TargetGen/dataset_co2_full.hdf5'])
     if os.path.isfile(ch4_target_file) is False or args.overwrite:
-        target_generation.main(['--ch4', '-z', str(mean_sza), '-s', '100', '-g', str(mean_elevation), '-w', str(mean_h2o), '--output', ch4_target_file, '--hdr', radiance_file_hdr])
+        target_generation.main(['--ch4', 
+                                '-z', str(mean_sza), 
+                                '-s', '100', 
+                                '-g', str(mean_elevation), 
+                                '-w', str(mean_h2o), 
+                                '--output', ch4_target_file, 
+                                '--hdr', radiance_file_hdr,
+                                '--lut_dataset', '/beegfs/scratch/jchapman/CO2CH4TargetGen/dataset_ch4_full.hdf5'])
 
 
     if (os.path.isfile(co2_mf_file) is False or args.overwrite) and args.co2:
-        subargs = [args.radiance_file, co2_target_file, co2_mf_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, '--wavelength_range', '1900', '2350', '--fixed_alpha', '0.0000000001', '--mask_clouds_water']
+        subargs = [args.radiance_file, 
+                   co2_target_file, 
+                   co2_mf_file, 
+                   '--n_mc', '1', 
+                   '--l1b_bandmask_file', args.l1b_bandmask_file, 
+                   '--l2a_mask_file', args.l2a_mask_file, 
+                   '--wavelength_range', '500', '1340', '1500', '1790', '1950', '2450', 
+                   '--fixed_alpha', '0.0000000001', 
+                   '--mask_clouds_water', 
+                   '--flare_outfile', flare_file, 
+                   '--noise_parameters_file', emit_noise_parameters_file, 
+                   '--sens_output_file', co2_mf_sens_file, 
+                   '--uncert_output_file', co2_mf_uncert_file]
         if args.ace_filter:
             subargs.append('--use_ace_filter')
         parallel_mf.main(subargs)
     
     if os.path.isfile(ch4_mf_file) is False or args.overwrite:
         logging.info('starting parallel mf')
-        subargs = [args.radiance_file, ch4_target_file, ch4_mf_file, '--n_mc', '1', '--l1b_bandmask_file', args.l1b_bandmask_file, '--l2a_mask_file', args.l2a_mask_file, '--wavelength_range', '500', '2450', '--fixed_alpha', '0.0000000001', '--mask_clouds_water', '--flare_outfile', flare_file]
+        
+        subargs = [args.radiance_file, 
+                   ch4_target_file, 
+                   ch4_mf_file, 
+                   '--n_mc', '1', 
+                   '--l1b_bandmask_file', args.l1b_bandmask_file, 
+                   '--l2a_mask_file', args.l2a_mask_file, 
+                   '--wavelength_range', '500', '1340', '1500', '1790', '1950', '2450', 
+                   '--fixed_alpha', '0.0000000001', 
+                   '--mask_clouds_water', 
+                   '--flare_outfile', flare_file, 
+                   '--noise_parameters_file', emit_noise_parameters_file, 
+                   '--sens_output_file', ch4_mf_sens_file, 
+                   '--uncert_output_file', ch4_mf_uncert_file]
+
         if args.mask_flares == 1:
             subargs.append('--mask_flares')
         if args.ace_filter:
             subargs.append('--use_ace_filter')
         parallel_mf.main(subargs)
 
-    #if (os.path.isfile(co2_mf_refined_file) is False or args.overwrite) and args.co2:
-    #    local_surface_control_simple.main([co2_mf_file, args.radiance_file, args.l1b_bandmask_file, co2_mf_refined_file, '--type', 'co2'])
-    #if os.path.isfile(ch4_mf_refined_file) is False or args.overwrite:
-    #    local_surface_control_simple.main([ch4_mf_file, args.radiance_file, args.l1b_bandmask_file, ch4_mf_refined_file, '--type', 'ch4'])
-
-    #if (os.path.isfile(co2_mf_refined_ort_file) is False or args.overwrite) and args.co2:
-    #    subprocess.call(f'python apply_glt.py {args.glt_file} {co2_mf_refined_file} {co2_mf_refined_ort_file}',shell=True)
-    #if os.path.isfile(ch4_mf_refined_ort_file) is False or args.overwrite:
-    #    subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_refined_file} {ch4_mf_refined_ort_file}',shell=True)
-
+    # ORT MF
     if (os.path.isfile(co2_mf_ort_file) is False or args.overwrite) and args.co2:
         subprocess.call(f'python apply_glt.py {args.glt_file} {co2_mf_file} {co2_mf_ort_file}',shell=True)
     if os.path.isfile(ch4_mf_ort_file) is False or args.overwrite:
         subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_file} {ch4_mf_ort_file}',shell=True)
-    
-    
-    #if os.path.isfile(ch4_mf_refined_scaled_ort_file) is False or args.overwrite:
-    #    scale.main([ch4_mf_refined_ort_file, ch4_mf_refined_scaled_ort_file, '1', '500'])
-    #if (os.path.isfile(co2_mf_refined_scaled_ort_file) is False or args.overwrite) and args.co2:
-    #    scale.main([co2_mf_refined_ort_file, co2_mf_refined_scaled_ort_file, '180', '11000'])
 
-    #if os.path.isfile(ch4_mf_refined_scaled_color_ort_file) is False or args.overwrite:
-    #    scale.main([ch4_mf_refined_ort_file, ch4_mf_refined_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
-    #if (os.path.isfile(co2_mf_refined_scaled_color_ort_file) is False or args.overwrite) and args.co2:
-    #    scale.main([co2_mf_refined_ort_file, co2_mf_refined_scaled_color_ort_file, '1', '100000', '--cmap', 'YlOrRd'])
+    # ORT Sensitivity
+    if os.path.isfile(co2_sens_ort_file) is False or args.overwrite and args.co2:
+        subprocess.call(f'python apply_glt.py {args.glt_file} {co2_mf_sens_file} {co2_sens_ort_file}',shell=True)
+    if os.path.isfile(co2_uncert_ort_file) is False or args.overwrite:
+        subprocess.call(f'python apply_glt.py {args.glt_file} {co2_mf_uncert_file} {co2_uncert_ort_file}',shell=True)
+    
+    # ORT Uncertainty
+    if os.path.isfile(ch4_sens_ort_file) is False or args.overwrite and args.co2:
+        subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_sens_file} {ch4_sens_ort_file}',shell=True)
+    if os.path.isfile(ch4_uncert_ort_file) is False or args.overwrite:
+        subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_uncert_file} {ch4_uncert_ort_file}',shell=True)
+    
 
+    # Color MF
+    if (os.path.isfile(co2_mf_scaled_color_ort_file) is False or args.overwrite) and args.co2:
+        scale.main([co2_mf_ort_file, co2_mf_scaled_color_ort_file, '1', '100000', '--cmap', 'viridis'])
     if os.path.isfile(ch4_mf_scaled_color_ort_file) is False or args.overwrite:
         scale.main([ch4_mf_ort_file, ch4_mf_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
-    if (os.path.isfile(co2_mf_scaled_color_ort_file) is False or args.overwrite) and args.co2:
-        scale.main([co2_mf_ort_file, co2_mf_scaled_color_ort_file, '1', '100000', '--cmap', 'YlOrRd'])
+
+    # Color Sensitivity
+    if (os.path.isfile(co2_sens_scaled_color_ort_file) is False or args.overwrite) and args.co2:
+        scale.main([co2_sens_ort_file, co2_sens_scaled_color_ort_file, '0', '2', '--cmap', 'RdBu_r'])
+    if os.path.isfile(ch4_sens_scaled_color_ort_file) is False or args.overwrite:
+        scale.main([ch4_sens_ort_file, ch4_sens_scaled_color_ort_file, '0', '2', '--cmap', 'RdBu_r'])
+
+    # Color Uncertainty
+    if (os.path.isfile(co2_uncert_scaled_color_ort_file) is False or args.overwrite) and args.co2:
+        scale.main([co2_uncert_ort_file, co2_uncert_scaled_color_ort_file, '1', '100000', '--cmap', 'viridis'])
+    if os.path.isfile(ch4_uncert_scaled_color_ort_file) is False or args.overwrite:
+        scale.main([ch4_uncert_ort_file, ch4_uncert_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
 
 
-    #if os.path.isfile(ch4_mf_refined_kmz_file) is False or args.overwrite:
-    #    hr_temp = f'{ch4_mf_refined_ort_file}_hrtemp'
-    #    subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {ch4_mf_refined_scaled_ort_file} {hr_temp} -dstnodata 0',shell=True)
-    #    subprocess.call(f'gdal_translate {hr_temp} {ch4_mf_refined_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
-    #    subprocess.call(f'rm {hr_temp}',shell=True)
-
-    #if (os.path.isfile(co2_mf_refined_kmz_file) is False or args.overwrite) and args.co2:
-    #    hr_temp = f'{co2_mf_refined_ort_file}_hrtemp'
-    #    subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {co2_mf_refined_scaled_ort_file} {hr_temp} -dstnodata 0',shell=True)
-    #    subprocess.call(f'gdal_translate {hr_temp} {co2_mf_refined_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
-    #    subprocess.call(f'rm {hr_temp}',shell=True)
-
-
-    #if os.path.isfile(ch4_mf_refined_color_kmz_file) is False or args.overwrite:
-    #    hr_temp = f'{ch4_mf_refined_ort_file}_hrtemp'
-    #    subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {ch4_mf_refined_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
-    #    subprocess.call(f'gdal_translate {hr_temp} {ch4_mf_refined_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
-    #    subprocess.call(f'rm {hr_temp}',shell=True)
-
-
-    #if os.path.isfile(co2_mf_refined_color_kmz_file) is False or args.overwrite:
-    #    hr_temp = f'{co2_mf_refined_ort_file}_hrtemp'
-    #    subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {co2_mf_refined_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
-    #    subprocess.call(f'gdal_translate {hr_temp} {co2_mf_refined_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
-    #    subprocess.call(f'rm {hr_temp}',shell=True)
-
-
-    #if os.path.isfile(ch4_mf_color_kmz_file) is False or args.overwrite:
-    #    hr_temp = f'{ch4_mf_refined_ort_file}_hrtemp'
-    #    subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {ch4_mf_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
-    #    subprocess.call(f'gdal_translate {hr_temp} {ch4_mf_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
-    #    subprocess.call(f'rm {hr_temp}',shell=True)
-
-    #if os.path.isfile(co2_mf_color_kmz_file) is False or args.overwrite:
-    #    hr_temp = f'{co2_mf_refined_ort_file}_hrtemp'
-    #    subprocess.call(f'gdalwarp -tr 0.00025 -0.00025 {co2_mf_scaled_color_ort_file} {hr_temp} -dstnodata 0',shell=True)
-    #    subprocess.call(f'gdal_translate {hr_temp} {co2_mf_color_kmz_file} -a_nodata 0 -of KMLSUPEROVERLAY -co format=PNG',shell=True)
-    #    subprocess.call(f'rm {hr_temp}',shell=True)
-
-
- 
     rdn_kmz = args.radiance_file.replace('.img','.kmz')
     dst_rdn_kmz = f'{args.output_base}_rdn_rgb.kmz'
     if os.path.isfile(rdn_kmz) and os.path.isfile(dst_rdn_kmz) is False:

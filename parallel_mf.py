@@ -24,7 +24,7 @@ import argparse
 from spectral.io import envi
 
 import sys
-import scipy
+import scipy.linalg
 import scipy.ndimage
 import numpy as np
 from utils import envi_header, write_bil_chunk
@@ -71,13 +71,25 @@ def main(input_args=None):
     parser.add_argument('--chunksize', type=int, default=None, help='chunk radiance (for memory issues with large scenes)')         
     parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')         
+    parser.add_argument('--uncert_output_file', type=str,  metavar='OUTPUT', help='path for uncertainty output image (mf ch4 ppm)')    
+    parser.add_argument('--sens_output_file', type=str,  metavar='OUTPUT', help='path for sensitivity output image (mf ch4 ppm)')    
+    parser.add_argument('--noise_parameters_file', type=str, default=None, help='Mandatory input to produce uncertainty metric. EMIT file found here: https://github.com/isofit/isofit/blob/dev/data/emit_noise.txt')         
     args = parser.parse_args(input_args)
+
+    if (args.uncert_output_file is not None and args.sens_output_file is None) or \
+       (args.uncert_output_file is None and args.sens_output_file is not None):
+        m = 'Both uncert_output_file and sens_output_file must be provided if either is provided. Only one or the other was provided.'
+        raise ValueError(m)
+
+    if args.uncert_output_file is not None and args.noise_parameters_file is None:
+        m = 'Argument uncert_output_file is provided but noise_parameters_file is not. ' + \
+            'The noise_parameters_file must be provided to generate the uncertainty.'
+        raise ValueError(m)
 
     #Set up logging
     logging.basicConfig(format='%(levelname)s:%(asctime)s ||| %(message)s', level=args.loglevel,
                         filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
    
-    
     logging.info('Started processing input file: "%s"'%str(args.radiance_file))
     ds = envi.open(envi_header(args.radiance_file),image=args.radiance_file)
     if 'wavelength' not in ds.metadata:
@@ -112,6 +124,12 @@ def main(input_args=None):
 
     logging.info(f'Active wavelength range: {args.wavelength_range}: {len(active_wl_idx)} channels')
 
+    logging.info("load noise model")
+    if args.noise_parameters_file is not None:
+        noise_model_parameters = noise_model_init(args.noise_parameters_file, wavelengths)[active_wl_idx, :]
+    else:
+        noise_model_parameters = None
+
     logging.info("load target library")
     library_reference = np.float64(np.loadtxt(args.library))
     absorption_coefficients = library_reference[active_wl_idx,2]
@@ -133,6 +151,15 @@ def main(input_args=None):
     output_shape = (int(outmeta['lines']),int(outmeta['bands']),int(outmeta['samples']))
     write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.output_file, 0, output_shape)
 
+    if args.uncert_output_file is not None:
+        output_ds = envi.create_image(envi_header(args.uncert_output_file),outmeta,force=True,ext='')
+        del output_ds
+        write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.uncert_output_file, 0, output_shape)
+    if args.sens_output_file is not None:
+        output_ds = envi.create_image(envi_header(args.sens_output_file),outmeta,force=True,ext='')
+        del output_ds
+        write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.sens_output_file, 0, output_shape)
+
  
     if args.chunksize is None:
         chunk_edges = [0, output_shape[0]]
@@ -148,7 +175,8 @@ def main(input_args=None):
     ray.init(**rayargs)
     rdn_id = None
     absorption_coefficients_id = ray.put(absorption_coefficients)
-    del absorption_coefficients
+    noise_model_parameters_id = ray.put(noise_model_parameters)
+    del absorption_coefficients, noise_model_parameters
     for _ce, ce in enumerate(chunk_edges[:-1]):
         
         if rdn_id is not None:
@@ -182,39 +210,56 @@ def main(input_args=None):
         logging.info('initializing ray, adding data to shared memory')
 
         rdn_id = ray.put(radiance)
-        del radiance 
-
+        del radiance
 
         logging.info('Run jobs')
-        jobs = [mf_one_column.remote(col, rdn_id, absorption_coefficients_id, active_wl_idx, good_pixel_mask, args) for col in range(output_shape[2])]
+        jobs = [mf_one_column.remote(col, rdn_id, absorption_coefficients_id, active_wl_idx, good_pixel_mask, noise_model_parameters_id, args) for col in range(output_shape[2])]
         rreturn = [ray.get(jid) for jid in jobs]
 
         logging.info('Collecting and writing output')
         output_dat = np.zeros(chunk_shape,dtype=np.float32)
+        output_uncert_dat = np.ones(chunk_shape,dtype=np.float32) * args.nodata_value
+        output_sens_dat = np.ones(chunk_shape,dtype=np.float32) * args.nodata_value
         for ret in rreturn:
             if ret[0] is not None:
                 output_dat[:, 0, ret[1]] = ret[0][:,0]
+                if ret[2] is not None:
+                    output_uncert_dat[:, 0, ret[1]] = ret[2][:]
+                if ret[3] is not None:
+                    output_sens_dat[:, 0, ret[1]] = ret[3][:]
+
+        def apply_badvalue(d, mask, bad_data_value):
+            d = d.transpose((0,2,1))
+            d[mask,:] = bad_data_value # could be nodata, but setting to 0 keeps maps continuous
+            d = d.transpose((0,2,1))
+            return d
     
         if args.mask_clouds_water and clouds_and_surface_water_mask is not None:
             logging.info('Masking clouds and water')
-            output_dat = output_dat.transpose((0,2,1))
-            output_dat[clouds_and_surface_water_mask,:] = 0 # could be nodata, but setting to 0 keeps maps continuous
-            output_dat = output_dat.transpose((0,2,1))
+            output_dat = apply_badvalue(output_dat, clouds_and_surface_water_mask, 0) # could be nodata, but setting to 0 keeps maps continuous
+            output_uncert_dat = apply_badvalue(output_uncert_dat, clouds_and_surface_water_mask, 0) # could be nodata, but setting to 0 keeps maps continuous
+            output_sens_dat = apply_badvalue(output_sens_dat, clouds_and_surface_water_mask, 0) # could be nodata, but setting to 0 keeps maps continuous
 
         if args.mask_saturation and saturation is not None:
             logging.info('Masking saturation')
-            output_dat = output_dat.transpose((0,2,1))
-            output_dat[saturation,:] = 0 # could be nodata, but setting to 0 keeps maps continuous
-            output_dat = output_dat.transpose((0,2,1))
+            output_dat = apply_badvalue(output_dat, saturation, 0) # could be nodata, but setting to 0 keeps maps continuous
+            output_uncert_dat = apply_badvalue(output_uncert_dat, saturation, 0) # could be nodata, but setting to 0 keeps maps continuous
+            output_sens_dat = apply_badvalue(output_sens_dat, saturation, 0) # could be nodata, but setting to 0 keeps maps continuous
 
         if args.mask_flares and saturation is not None:
             logging.info('Masking saturation')
-            output_dat = output_dat.transpose((0,2,1))
-            output_dat[dilated_saturation,:] = -1 # could be nodata, but setting to 0 keeps maps continuous
-            output_dat[dilated_flare_mask,:] = -1 # could be nodata, but setting to 0 keeps maps continuous
-            output_dat = output_dat.transpose((0,2,1))
+            output_dat = apply_badvalue(output_dat, dilated_saturation, -1) # could be nodata, but setting to 0 keeps maps continuous
+            output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_saturation, -1) # could be nodata, but setting to 0 keeps maps continuous
+            output_sens_dat = apply_badvalue(output_sens_dat, dilated_saturation, -1) # could be nodata, but setting to 0 keeps maps continuous
+            output_dat = apply_badvalue(output_dat, dilated_flare_mask, -1) # could be nodata, but setting to 0 keeps maps continuous
+            output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_flare_mask, -1) # could be nodata, but setting to 0 keeps maps continuous
+            output_sens_dat = apply_badvalue(output_sens_dat, dilated_flare_mask, -1) # could be nodata, but setting to 0 keeps maps continuous
 
         write_bil_chunk(output_dat, args.output_file, ce, chunk_shape)
+        if args.uncert_output_file is not None:
+            write_bil_chunk(output_uncert_dat, args.uncert_output_file, ce, chunk_shape)
+        if args.sens_output_file is not None:
+            write_bil_chunk(output_sens_dat, args.sens_output_file, ce, chunk_shape)
         logging.info('Complete')
 
 
@@ -390,8 +435,24 @@ def calculate_flare_mask(radiance: np.array, preflagged_pixels: np.array, wavele
     return hot_mask_dilated, hot_mask
 
 
+def noise_model_init(noise_file, wl_nm: np.array):
+    coeffs = np.loadtxt(noise_file, delimiter=" ", comments="#")
+    p_a, p_b, p_c = [scipy.interpolate.interp1d(coeffs[:, 0], coeffs[:, col], fill_value="extrapolate") for col in (1, 2, 3)]
+    noise = np.array([[p_a(w), p_b(w), p_c(w)] for w in (wl_nm)])
+    return noise
+
+
+def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, radiance: np.array):
+    noise_plus_meas = noise_model_parameters[:, 1] + radiance
+    if np.any(noise_plus_meas <= 0):
+        noise_plus_meas[noise_plus_meas <= 0] = 1e-5
+        print( "Parametric noise model found noise <= 0 - adjusting to slightly" " positive to avoid /0.")
+    nedl = np.abs(noise_model_parameters[:, 0] * np.sqrt(noise_plus_meas) + noise_model_parameters[:, 2])
+    return nedl
+
+
 @ray.remote
-def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.array, active_wl_idx: np.array, good_pixel_mask: np.array, args):
+def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.array, active_wl_idx: np.array, good_pixel_mask: np.array, noise_model_parameters: np.array, args):
     """ Run the matched filter on a single column of the input image
 
     Args:
@@ -417,9 +478,14 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
     if len(good_pixel_idx) < 10:
         logging.debug('Too few good pixels found in col {col}: skipping')
         return None, None
+
+    if args.uncert_output_file is not None:
+        nedl_variance = (get_noise_equivalent_spectral_radiance(noise_model_parameters, rdn))**2
     
     # array to hold results in
     mf_mc = np.ones((rdn.shape[0],args.n_mc)) * args.nodata_value
+    uncert_mc = np.ones((rdn.shape[0],args.n_mc)) * args.nodata_value
+    sens_mc = np.ones((rdn.shape[0],args.n_mc)) * args.nodata_value
 
     np.random.seed(13)
     for _mc in range(args.n_mc):
@@ -453,15 +519,45 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
             normalizer = normalizer * rx
 
         mf = ((loc_rdn[no_radiance_mask,:] - mu).dot(Cinv).dot(target.T)) / normalizer
+
+        if args.uncert_output_file is not None:
+            ####################################################################################################################
+            # Uncertainty
+            # This implements (s^T Cinv Sigma Cinv s) / (s^T Cinv aX) (in linear algebra notation)
+            # Sigma is diagonal, so we just need a standard numpy multiply, which we can also broadcast along the whole column
+            sC = target.dot(Cinv)
+            numer = (sC * nedl_variance[no_radiance_mask,:]) @ sC
+            a_times_X = -1 * absorption_coefficients.copy() * loc_rdn[no_radiance_mask, :]
+            denom = ((a_times_X).dot(Cinv).dot(target.T))**2
+            uncert = np.sqrt(numer/denom)
+            ####################################################################################################################
+
+            sens_mc[no_radiance_mask,_mc] = np.sqrt(denom) / normalizer
+        
         
         # scale outputs
         mf_mc[no_radiance_mask,_mc] = mf * args.ppm_scaling
+        if args.uncert_output_file is not None:
+            uncert_mc[no_radiance_mask,_mc] = uncert * args.ppm_scaling
     
     output = np.vstack([np.mean(mf_mc,axis=-1), np.std(mf_mc,axis=-1)]).T
     output[np.logical_not(no_radiance_mask),:] = args.nodata_value
 
+    if args.uncert_output_file is not None:
+        uncert = uncert_mc[:,0]
+        uncert[np.logical_not(no_radiance_mask)] = args.nodata_value
+        uncert[np.logical_not(np.isfinite(uncert))] = args.nodata_value
+        sens = sens_mc[:,0]
+        sens[np.logical_not(no_radiance_mask)] = args.nodata_value
+        sens[np.logical_not(np.isfinite(uncert))] = args.nodata_value
+    else:
+        #uncert = np.ones(rdn.shape[0]) * args.nodata_value
+        #sens = np.ones(rdn.shape[0]) * args.nodata_value
+        uncert = None
+        sens = None
+        
     logging.debug(f'Column {col} mean: {np.mean(output[good_pixel_idx,0])}')
-    return output.astype(np.float32), col
+    return output.astype(np.float32), col, uncert, sens
 
 
 if __name__ == '__main__':
