@@ -141,9 +141,23 @@ def main(input_args=None):
 
 
     if (os.path.isfile(co2_target_file) is False or args.overwrite) and args.co2:
-        target_generation.main(['--co2', '-z', str(mean_sza), '-s', '100', '-g', str(mean_elevation), '-w', str(mean_h2o), '--output', co2_target_file, '--hdr', radiance_file_hdr])
+        target_generation.main(['--co2', 
+                                '-z', str(mean_sza), 
+                                '-s', '100', 
+                                '-g', str(mean_elevation), 
+                                '-w', str(mean_h2o), 
+                                '--output', co2_target_file, 
+                                '--hdr', radiance_file_hdr,
+                                '--lut_dataset', '/beegfs/scratch/jchapman/CO2CH4TargetGen/dataset_co2_full.hdf5'])
     if os.path.isfile(ch4_target_file) is False or args.overwrite:
-        target_generation.main(['--ch4', '-z', str(mean_sza), '-s', '100', '-g', str(mean_elevation), '-w', str(mean_h2o), '--output', ch4_target_file, '--hdr', radiance_file_hdr])
+        target_generation.main(['--ch4', 
+                                '-z', str(mean_sza), 
+                                '-s', '100', 
+                                '-g', str(mean_elevation), 
+                                '-w', str(mean_h2o), 
+                                '--output', ch4_target_file, 
+                                '--hdr', radiance_file_hdr,
+                                '--lut_dataset', '/beegfs/scratch/jchapman/CO2CH4TargetGen/dataset_ch4_full.hdf5'])
 
 
     if (os.path.isfile(co2_mf_file) is False or args.overwrite) and args.co2:
