@@ -42,7 +42,7 @@ def get_5deg_zenith_angle_index(zenith_value):
 @np.vectorize
 def get_5deg_sensor_height_index(sensor_value):  # [1, 2, 4, 10, 20, 120]
     # Only check lower bound here, atmosphere ends at 120 km so clamping there is okay.
-    check_param(sensor_value, 1, np.inf, 'Sensor Height')
+    check_param(sensor_value, 0.5, np.inf, 'Sensor Height')
     # There's not really a pattern here, so just linearly interpolate between values -- piecewise linear
     if sensor_value < 1.0:
         return np.float64(0.0)
