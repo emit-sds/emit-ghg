@@ -186,10 +186,10 @@ def main(input_args=None):
     #if os.path.isfile(ch4_mf_refined_ort_file) is False or args.overwrite:
     #    subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_refined_file} {ch4_mf_refined_ort_file}',shell=True)
 
-    if (os.path.isfile(co2_mf_ort_file) is False or args.overwrite) and args.co2:
-        subprocess.call(f'python apply_glt.py {args.glt_file} {co2_mf_file} {co2_mf_ort_file}',shell=True)
-    if os.path.isfile(ch4_mf_ort_file) is False or args.overwrite:
-        subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_file} {ch4_mf_ort_file}',shell=True)
+    #if (os.path.isfile(co2_mf_ort_file) is False or args.overwrite) and args.co2:
+    #    subprocess.call(f'python apply_glt.py {args.glt_file} {co2_mf_file} {co2_mf_ort_file}',shell=True)
+    #if os.path.isfile(ch4_mf_ort_file) is False or args.overwrite:
+    #    subprocess.call(f'python apply_glt.py {args.glt_file} {ch4_mf_file} {ch4_mf_ort_file}',shell=True)
     
     
     #if os.path.isfile(ch4_mf_refined_scaled_ort_file) is False or args.overwrite:
@@ -202,10 +202,10 @@ def main(input_args=None):
     #if (os.path.isfile(co2_mf_refined_scaled_color_ort_file) is False or args.overwrite) and args.co2:
     #    scale.main([co2_mf_refined_ort_file, co2_mf_refined_scaled_color_ort_file, '1', '100000', '--cmap', 'YlOrRd'])
 
-    if os.path.isfile(ch4_mf_scaled_color_ort_file) is False or args.overwrite:
-        scale.main([ch4_mf_ort_file, ch4_mf_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
-    if (os.path.isfile(co2_mf_scaled_color_ort_file) is False or args.overwrite) and args.co2:
-        scale.main([co2_mf_ort_file, co2_mf_scaled_color_ort_file, '1', '100000', '--cmap', 'YlOrRd'])
+    #if os.path.isfile(ch4_mf_scaled_color_ort_file) is False or args.overwrite:
+    #    scale.main([ch4_mf_ort_file, ch4_mf_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
+    #if (os.path.isfile(co2_mf_scaled_color_ort_file) is False or args.overwrite) and args.co2:
+    #    scale.main([co2_mf_ort_file, co2_mf_scaled_color_ort_file, '1', '100000', '--cmap', 'YlOrRd'])
 
 
     #if os.path.isfile(ch4_mf_refined_kmz_file) is False or args.overwrite:
