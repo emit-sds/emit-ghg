@@ -451,7 +451,7 @@ def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, rad
     return nedl
 
 
-@ray.remote
+@ray.remote(num_cpus=1)
 def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.array, active_wl_idx: np.array, good_pixel_mask: np.array, noise_model_parameters: np.array, args):
     """ Run the matched filter on a single column of the input image
 
