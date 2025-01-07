@@ -20,9 +20,10 @@ import argparse
 import numpy as np
 from osgeo import gdal
 from spectral.io import envi
+import pdb
 
 from emit_utils.file_checks import envi_header
-from utils import write_bil_chunk
+from utils import write_bil_chunk, ReadAbstractDataSet
 
 def single_image_ortho(img_dat, in_glt, glt_nodata_value=0):
     """Orthorectify a single image
@@ -49,16 +50,19 @@ def main(input_args=None):
     args = parser.parse_args(input_args)
 
 
-    glt_dataset = envi.open(envi_header(args.glt_file))
-    glt = glt_dataset.open_memmap(writeable=False, interleave='bip').copy()
-    del glt_dataset
-    glt_dataset = gdal.Open(args.glt_file)
+    #glt_dataset = envi.open(envi_header(args.glt_file))
+    #glt = glt_dataset.open_memmap(writeable=False, interleave='bip').copy()
+    #del glt_dataset
+    #glt_dataset = gdal.Open(args.glt_file)
+
+    # Pass in the radiance netCDF4 file instead of glt ENVI file
+    glt_dataset = ReadAbstractDataSet(args.glt_file, netcdf_key = 'radiance')
+    glt = np.stack([glt_dataset.glt_x, glt_dataset.glt_y]).transpose([1,2,0])
 
     img_ds = envi.open(envi_header(args.raw_file))
     img_dat = img_ds.open_memmap(writeable=False, interleave='bip').copy()
 
     ort_img = single_image_ortho(img_dat, glt)
-    
 
     band_names = None
     if 'band names' in envi.open(envi_header(args.raw_file)).metadata.keys():

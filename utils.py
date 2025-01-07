@@ -116,6 +116,7 @@ class ReadAbstractDataSet():
         
         if self.filetype == 'netCDF4':
             import xarray as xr 
+            import netCDF4
             self.ds = xr.open_dataset(self.filename, engine = 'netcdf4', group = netcdf_group)
 
             self.data = self.ds[netcdf_key].values
@@ -137,6 +138,15 @@ class ReadAbstractDataSet():
             except:
                 wavelengths = None
                 fwhm = None
+            
+            try:
+                in_ds = netCDF4.Dataset(self.filename)
+                self.glt_x, self.glt_y = in_ds['/location/glt_x'], in_ds['/location/glt_y']
+                self.spatial_ref = in_ds.spatial_ref
+                self.geotransform = in_ds.geotransform
+            except:
+                pass
+
 
             self.metadata = {'wavelength': wavelengths,
                              'fwhm': fwhm,
@@ -154,6 +164,12 @@ class ReadAbstractDataSet():
             return self.memmap[key]
         if self.filetype == 'netCDF4':
             return self.data[key]
+    
+    def GetProjection(self):
+        return self.spatial_ref
+    
+    def GetGeoTransform(self):
+        return self.geotransform
 
 class WriteAbstractDataSet():
     """Wrapper class to write to arbitrary output file formats. Currenlty only supports ENVI.
