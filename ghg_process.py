@@ -22,15 +22,51 @@ import subprocess
 import target_generation
 import parallel_mf
 import scale
+import apply_glt
 import logging
 from spectral.io import envi
 import numpy as np
 import os
-from utils import envi_header
+from utils import envi_header, convert_to_cog
 from osgeo import gdal
 from files import Filenames
 
-
+metadata = {
+    'ch4': {
+        'mf': {
+            'name': 'EMIT_L2B_CH4ENH',
+            'description': 'Methane Enhancement Values',
+            'units': 'ppm m'
+        },
+        'sens': {
+            'name': 'EMIT_L2B_CH4SNS',
+            'description': 'Methane Enhancement Sensitivity Values',
+            'units': 'unitless'
+        },
+        'unc': {
+            'name': 'EMIT_L2B_CH4UNC',
+            'description': 'Methane Enhancement Uncertainty Values',
+            'units': 'unitless'
+        }
+    },
+    'co2': {
+        'mf': {
+            'name': 'EMIT_L2B_CO2ENH',
+            'description': 'Carbon Dioxide Enhancement Values',
+            'units': 'ppm m'
+        },
+        'sens': {
+            'name': 'EMIT_L2B_CO2SNS',
+            'description': 'Carbon Dioxide Enhancement Sensitivity Values',
+            'units': 'unitless'
+        },
+        'unc': {
+            'name': 'EMIT_L2B_CO2UNC',
+            'description': 'Carbon Dioxide Enhancement Uncertainty Values',
+            'units': 'unitless'
+        }
+    }
+}
 
 def main(input_args=None):
     parser = argparse.ArgumentParser(description="Robust MF")
@@ -54,7 +90,6 @@ def main(input_args=None):
     parser.add_argument('--co2', action='store_true', help='flag to indicate whether to run co2')    
     args = parser.parse_args(input_args)
                    
-
     if args.wavelength_range is not None and len(args.wavelength_range) % 2 != 0:
         raise ValueError('wavelength_range must have an even number of elements')
 
@@ -72,12 +107,14 @@ def main(input_args=None):
 
     files = Filenames(args.output_base)
     
-    if os.path.isfile(files.mf_file):
-        dat = gdal.Open(files.mf_file).ReadAsArray()
+    # if os.path.isfile(files.mf_file):
+    #     dat = gdal.Open(files.mf_file).ReadAsArray()
         #if np.all(dat == -9999):
         #    subprocess.call(f'rm {args.output_base}_ch4*',shell=True)
 
-    if os.path.isfile(files.target_file) is False  or args.overwrite:
+    print(files.target_file)
+
+    if os.path.isfile(files.target_file) is False or args.overwrite:
         sza = envi.open(obs_file_hdr).open_memmap(interleave='bip')[...,4]
         mean_sza = np.mean(sza[sza != -9999])
 
@@ -108,8 +145,12 @@ def main(input_args=None):
 
         if args.co2:
             target_params.append('--co2')
+            gas = 'co2'
+        else:
+            gas = 'ch4'
+        print(target_params)
 
-        target_generation.main()
+        target_generation.main(target_params)
 
     # Run MF
     if (os.path.isfile(files.mf_file) is False or args.overwrite):
@@ -135,39 +176,60 @@ def main(input_args=None):
         if args.ace_filter:
             subargs.append('--use_ace_filter')
         parallel_mf.main(subargs)
-    
+
     # ORT MF
     if (os.path.isfile(files.mf_ort_file) is False or args.overwrite):
-        subprocess.call(f'python apply_glt.py {args.glt_file} {files.mf_file} {files.mf_ort_file}',shell=True)
-        subprocess.call(f'gdal_translate {files.mf_ort_file} {files.mf_ort_file}.tif -of COG',shell=True)
-
+        apply_glt.main([args.glt_file, files.mf_file, files.mf_ort_file])
+        # subprocess.call(f'gdal_translate {files.mf_ort_file} {files.mf_ort_cog} -of COG',shell=True)
+        # subprocess.call(f'gdal_translate {files.mf_ort_file} {files.mf_ort_cog} -co COMPRESS=LZW -co TILED=YES -co COPY_SRC_OVERVIEWS=YES',shell=True)
+        # os.system(f'gdal_translate {files.mf_ort_file} {files.mf_ort_cog} -co COMPRESS=LZW -co TILED=YES -co COPY_SRC_OVERVIEWS=YES')
+        convert_to_cog(files.mf_ort_file, 
+                       files.mf_ort_cog, 
+                       metadata[gas]['mf'])
+    
     # ORT Sensitivity
     if os.path.isfile(files.sens_ort_file) is False or args.overwrite:
-        subprocess.call(f'python apply_glt.py {args.glt_file} {files.mf_sens_file} {files.sens_ort_file}',shell=True)
+        apply_glt.main([args.glt_file, files.mf_sens_file, files.sens_ort_file])
     if os.path.isfile(files.sens_ort_cog) is False or args.overwrite:
-        subprocess.call(f'gdal_translate {files.sens_ort_file} {files.sens_ort_cog} -of COG',shell=True)
-    
+        # subprocess.call(f'gdal_translate {files.sens_ort_file} {files.sens_ort_cog} -of COG',shell=True)
+        # subprocess.call(f'gdal_translate {files.sens_ort_file} {files.sens_ort_cog} -co COMPRESS=LZW -co TILED=YES -co COPY_SRC_OVERVIEWS=YES',shell=True)
+        # os.system(f'gdal_translate {files.sens_ort_file} {files.sens_ort_cog} -co COMPRESS=LZW -co TILED=YES -co COPY_SRC_OVERVIEWS=YES')
+        convert_to_cog(files.sens_ort_file, 
+                       files.sens_ort_cog,
+                       metadata[gas]['sens'])
+
     # ORT Uncertainty
     if os.path.isfile(files.uncert_ort_file) is False or args.overwrite:
-        subprocess.call(f'python apply_glt.py {args.glt_file} {files.mf_uncert_file} {files.uncert_ort_file}',shell=True)
+        apply_glt.main([args.glt_file, files.mf_uncert_file, files.uncert_ort_file])
     if os.path.isfile(files.uncert_ort_cog) is False or args.overwrite:
-        subprocess.call(f'gdal_translate {files.uncert_ort_file} {files.uncert_ort_cog} -of COG',shell=True)
-    
+        # subprocess.call(f'gdal_translate {files.uncert_ort_file} {files.uncert_ort_cog} -of COG',shell=True)
+        # subprocess.call(f'gdal_translate {files.uncert_ort_file} {files.uncert_ort_cog} -co COMPRESS=LZW -co TILED=YES -co COPY_SRC_OVERVIEWS=YES',shell=True)
+        # os.system(f'gdal_translate {files.uncert_ort_file} {files.uncert_ort_cog} -co COMPRESS=LZW -co TILED=YES -co COPY_SRC_OVERVIEWS=YES') 
+        convert_to_cog(files.uncert_ort_file, 
+                       files.uncert_ort_cog,
+                       metadata[gas]['unc'])
+
+    # Quicklook MF
+    if (os.path.isfile(files.mf_ort_ql) is False or args.overwrite) and args.co2:
+        scale.main([files.mf_ort_file, files.mf_ort_ql, '1', '100000', '--cmap', 'viridis'])
+    if os.path.isfile(files.mf_ort_ql) is False or args.overwrite:
+        scale.main([files.mf_ort_file, files.mf_ort_ql, '1', '1000', '--cmap', 'plasma'])
+
     # Color MF
-    if (os.path.isfile(files.mf_scaled_color_ort_file) is False or args.overwrite) and args.co2:
-        scale.main([files.mf_ort_file, files.mf_scaled_color_ort_file, '1', '100000', '--cmap', 'viridis'])
-    if os.path.isfile(files.mf_scaled_color_ort_file) is False or args.overwrite:
-        scale.main([files.mf_ort_file, files.mf_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
+    # if (os.path.isfile(files.mf_scaled_color_ort_file) is False or args.overwrite) and args.co2:
+    #     scale.main([files.mf_ort_file, files.mf_scaled_color_ort_file, '1', '100000', '--cmap', 'viridis'])
+    # if os.path.isfile(files.mf_scaled_color_ort_file) is False or args.overwrite:
+    #     scale.main([files.mf_ort_file, files.mf_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
 
-    # Color Sensitivity (same for co2 and ch4)
-    if os.path.isfile(files.sens_scaled_color_ort_file) is False or args.overwrite:
-        scale.main([files.sens_ort_file, files.sens_scaled_color_ort_file, '0', '2', '--cmap', 'RdBu_r'])
+    # # Color Sensitivity (same for co2 and ch4)
+    # if os.path.isfile(files.sens_scaled_color_ort_file) is False or args.overwrite:
+    #     scale.main([files.sens_ort_file, files.sens_scaled_color_ort_file, '0', '2', '--cmap', 'RdBu_r'])
 
-    # Color Uncertainty
-    if (os.path.isfile(files.uncert_scaled_color_ort_file) is False or args.overwrite) and args.co2:
-        scale.main([files.uncert_ort_file, files.uncert_scaled_color_ort_file, '1', '100000', '--cmap', 'viridis'])
-    if os.path.isfile(files.uncert_scaled_color_ort_file) is False or args.overwrite:
-        scale.main([files.uncert_ort_file, files.uncert_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
+    # # Color Uncertainty
+    # if (os.path.isfile(files.uncert_scaled_color_ort_file) is False or args.overwrite) and args.co2:
+    #     scale.main([files.uncert_ort_file, files.uncert_scaled_color_ort_file, '1', '100000', '--cmap', 'viridis'])
+    # if os.path.isfile(files.uncert_scaled_color_ort_file) is False or args.overwrite:
+    #     scale.main([files.uncert_ort_file, files.uncert_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
 
 
 if __name__ == '__main__':

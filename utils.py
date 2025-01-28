@@ -19,6 +19,7 @@
 import os
 import numpy as np
 import json
+from osgeo import gdal
 
 def envi_header(inputpath):
     """
@@ -75,3 +76,40 @@ class SerialEncoder(json.JSONEncoder):
         else:
             return super(SerialEncoder, self).default(obj)
 
+   
+def convert_to_cog(input_file, output_file,metadata = None):
+    src_ds = gdal.Open(input_file)
+    if src_ds is None:
+        raise ValueError(f"Unable to open input file: {input_file}")
+
+    options = [
+        'COMPRESS=LZW',
+        'TILED=YES',
+        'COPY_SRC_OVERVIEWS=YES'
+    ]
+
+    gdal.Translate(output_file, src_ds, creationOptions=options)
+    os.system(f"gdaladdo -minsize 900 {output_file}")
+
+    src_ds = None
+    
+    if metadata:
+        in_ds = gdal.Open(output_file, gdal.GA_Update)
+        if in_ds is None:
+            raise ValueError(f"Unable to open output file for updating: {output_file}")
+
+        in_meta = in_ds.GetMetadata()
+
+        if 'Band_1' in in_meta:
+            del in_meta['Band_1']
+        in_meta["DESCRIPTION"] =  metadata['description']   
+        in_ds.SetMetadata(in_meta)
+        
+        band = in_ds.GetRasterBand(1)
+        band.SetDescription(metadata['name'])
+        band.SetMetadataItem("UNITS",metadata['units'])
+        band.FlushCache()
+        del band
+        del in_ds
+        
+        
