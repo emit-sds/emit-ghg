@@ -27,7 +27,7 @@ import logging
 from spectral.io import envi
 import numpy as np
 import os
-from utils import envi_header, convert_to_cog
+from utils import envi_header
 from osgeo import gdal
 from files import Filenames
 
@@ -70,32 +70,32 @@ metadata = {
 
 def main(input_args=None):
     parser = argparse.ArgumentParser(description="Robust MF")
-    parser.add_argument('radiance_file', type=str,  metavar='INPUT', help='path to input image')   
-    parser.add_argument('obs_file', type=str,  help='path to observation image')   
-    parser.add_argument('loc_file', type=str,  help='path to location image')   
-    parser.add_argument('glt_file', type=str,  help='path to glt image')   
-    parser.add_argument('l1b_bandmask_file', type=str,  help='path to l1b bandmask image')   
-    parser.add_argument('l2a_mask_file', type=str,  help='path to l2a mask image')   
-    parser.add_argument('output_base', type=str,  help='output basepath for output image')    
-    parser.add_argument('--state_subs', type=str, default=None,  help='state file from OE retrieval')    
-    parser.add_argument('--overwrite', action='store_true',  help='state file from OE retrieval')    
-    parser.add_argument('--ace_filter', action='store_true',  help='use an ACE filter during matched filter')    
-    parser.add_argument('--loglevel', type=str, default='INFO', help='logging verbosity')    
-    parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')    
-    parser.add_argument('--mask_flares', type=int, default=1, help='mask flares in output')    
+    parser.add_argument('radiance_file', type=str,  metavar='INPUT', help='path to input image')
+    parser.add_argument('obs_file', type=str,  help='path to observation image')
+    parser.add_argument('loc_file', type=str,  help='path to location image')
+    parser.add_argument('glt_file', type=str,  help='path to glt image')
+    parser.add_argument('l1b_bandmask_file', type=str,  help='path to l1b bandmask image')
+    parser.add_argument('l2a_mask_file', type=str,  help='path to l2a mask image')
+    parser.add_argument('output_base', type=str,  help='output basepath for output image')
+    parser.add_argument('--state_subs', type=str, default=None,  help='state file from OE retrieval')
+    parser.add_argument('--overwrite', action='store_true',  help='state file from OE retrieval')
+    parser.add_argument('--ace_filter', action='store_true',  help='use an ACE filter during matched filter')
+    parser.add_argument('--loglevel', type=str, default='INFO', help='logging verbosity')
+    parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')
+    parser.add_argument('--mask_flares', type=int, default=1, help='mask flares in output')
     parser.add_argument('--lut_file', type=str, default='/store/shared/ghg/dataset_ch4_full.hdf5')
     parser.add_argument('--noise_file', type=str, default='instrument_noise_parameters/emit_noise.txt')
-    parser.add_argument('--wavelength_range', nargs='+', type=float, default=[500, 1340, 1500, 1790, 1950, 2450], 
+    parser.add_argument('--wavelength_range', nargs='+', type=float, default=[500, 1340, 1500, 1790, 1950, 2450],
                         help='wavelengths to use: None = default for gas, 2x values = min/max pairs of regions')
-    parser.add_argument('--co2', action='store_true', help='flag to indicate whether to run co2')    
+    parser.add_argument('--co2', action='store_true', help='flag to indicate whether to run co2')
     args = parser.parse_args(input_args)
-                   
+
     if args.wavelength_range is not None and len(args.wavelength_range) % 2 != 0:
         raise ValueError('wavelength_range must have an even number of elements')
 
     radiance_file = args.radiance_file
     radiance_file_hdr = envi_header(radiance_file)
- 
+
     obs_file = args.obs_file
     obs_file_hdr = envi_header(obs_file)
 
@@ -106,7 +106,7 @@ def main(input_args=None):
                         filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
 
     files = Filenames(args.output_base)
-    
+
     # if os.path.isfile(files.mf_file):
     #     dat = gdal.Open(files.mf_file).ReadAsArray()
         #if np.all(dat == -9999):
@@ -135,11 +135,11 @@ def main(input_args=None):
 
     # Run target generation
     if (os.path.isfile(files.target_file) is False or args.overwrite):
-        target_params = ['-z', str(mean_sza), 
-                         '-s', '100', 
-                         '-g', str(mean_elevation), 
-                         '-w', str(mean_h2o), 
-                         '--output', files.target_file, 
+        target_params = ['-z', str(mean_sza),
+                         '-s', '100',
+                         '-g', str(mean_elevation),
+                         '-w', str(mean_h2o),
+                         '--output', files.target_file,
                          '--hdr', radiance_file_hdr,
                          '--lut_dataset', args.lut_file]
 
@@ -154,17 +154,17 @@ def main(input_args=None):
 
     # Run MF
     if (os.path.isfile(files.mf_file) is False or args.overwrite):
-        subargs = [args.radiance_file, 
-                   files.target_file, 
-                   files.mf_file, 
-                   '--n_mc', '1', 
-                   '--l1b_bandmask_file', args.l1b_bandmask_file, 
-                   '--l2a_mask_file', args.l2a_mask_file, 
-                   '--fixed_alpha', '0.0000000001', 
-                   '--mask_clouds_water', 
-                   '--flare_outfile', files.flare_file, 
-                   '--noise_parameters_file', args.noise_file, 
-                   '--sens_output_file', files.mf_sens_file, 
+        subargs = [args.radiance_file,
+                   files.target_file,
+                   files.mf_file,
+                   '--n_mc', '1',
+                   '--l1b_bandmask_file', args.l1b_bandmask_file,
+                   '--l2a_mask_file', args.l2a_mask_file,
+                   '--fixed_alpha', '0.0000000001',
+                   '--mask_clouds_water',
+                   '--flare_outfile', files.flare_file,
+                   '--noise_parameters_file', args.noise_file,
+                   '--sens_output_file', files.mf_sens_file,
                    '--uncert_output_file', files.mf_uncert_file]
 
         if args.wavelength_range is not None:
@@ -180,34 +180,19 @@ def main(input_args=None):
     # ORT MF
     if (os.path.isfile(files.mf_ort_file) is False or args.overwrite):
         apply_glt.main([args.glt_file, files.mf_file, files.mf_ort_file])
-        # subprocess.call(f'gdal_translate {files.mf_ort_file} {files.mf_ort_cog} -of COG',shell=True)
-        # subprocess.call(f'gdal_translate {files.mf_ort_file} {files.mf_ort_cog} -co COMPRESS=LZW -co TILED=YES -co COPY_SRC_OVERVIEWS=YES',shell=True)
-        # os.system(f'gdal_translate {files.mf_ort_file} {files.mf_ort_cog} -co COMPRESS=LZW -co TILED=YES -co COPY_SRC_OVERVIEWS=YES')
-        convert_to_cog(files.mf_ort_file, 
-                       files.mf_ort_cog, 
-                       metadata[gas]['mf'])
-    
+        subprocess.call(f'gdal_translate {files.mf_ort_file} {files.mf_ort_cog} -of COG',shell=True)
+
     # ORT Sensitivity
     if os.path.isfile(files.sens_ort_file) is False or args.overwrite:
         apply_glt.main([args.glt_file, files.mf_sens_file, files.sens_ort_file])
     if os.path.isfile(files.sens_ort_cog) is False or args.overwrite:
-        # subprocess.call(f'gdal_translate {files.sens_ort_file} {files.sens_ort_cog} -of COG',shell=True)
-        # subprocess.call(f'gdal_translate {files.sens_ort_file} {files.sens_ort_cog} -co COMPRESS=LZW -co TILED=YES -co COPY_SRC_OVERVIEWS=YES',shell=True)
-        # os.system(f'gdal_translate {files.sens_ort_file} {files.sens_ort_cog} -co COMPRESS=LZW -co TILED=YES -co COPY_SRC_OVERVIEWS=YES')
-        convert_to_cog(files.sens_ort_file, 
-                       files.sens_ort_cog,
-                       metadata[gas]['sens'])
+        subprocess.call(f'gdal_translate {files.sens_ort_file} {files.sens_ort_cog} -of COG',shell=True)
 
     # ORT Uncertainty
     if os.path.isfile(files.uncert_ort_file) is False or args.overwrite:
         apply_glt.main([args.glt_file, files.mf_uncert_file, files.uncert_ort_file])
     if os.path.isfile(files.uncert_ort_cog) is False or args.overwrite:
-        # subprocess.call(f'gdal_translate {files.uncert_ort_file} {files.uncert_ort_cog} -of COG',shell=True)
-        # subprocess.call(f'gdal_translate {files.uncert_ort_file} {files.uncert_ort_cog} -co COMPRESS=LZW -co TILED=YES -co COPY_SRC_OVERVIEWS=YES',shell=True)
-        # os.system(f'gdal_translate {files.uncert_ort_file} {files.uncert_ort_cog} -co COMPRESS=LZW -co TILED=YES -co COPY_SRC_OVERVIEWS=YES') 
-        convert_to_cog(files.uncert_ort_file, 
-                       files.uncert_ort_cog,
-                       metadata[gas]['unc'])
+        subprocess.call(f'gdal_translate {files.uncert_ort_file} {files.uncert_ort_cog} -of COG',shell=True)
 
     # Quicklook MF
     if (os.path.isfile(files.mf_ort_ql) is False or args.overwrite) and args.co2:
