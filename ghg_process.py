@@ -17,18 +17,16 @@
 # Authors: Philip G. Brodrick, philip.brodrick@jpl.nasa.gov
 
 import argparse
-import subprocess
+import logging
+import os
 
 import target_generation
 import parallel_mf
 import scale
 import apply_glt
-import logging
 from spectral.io import envi
 import numpy as np
-import os
-from utils import envi_header
-from osgeo import gdal
+from utils import envi_header, convert_to_cog
 from files import Filenames
 
 metadata = {
@@ -46,7 +44,7 @@ metadata = {
         'unc': {
             'name': 'EMIT_L2B_CH4UNC',
             'description': 'Methane Enhancement Uncertainty Values',
-            'units': 'unitless'
+            'units':  'ppm m'
         }
     },
     'co2': {
@@ -63,7 +61,7 @@ metadata = {
         'unc': {
             'name': 'EMIT_L2B_CO2UNC',
             'description': 'Carbon Dioxide Enhancement Uncertainty Values',
-            'units': 'unitless'
+            'units': 'ppm m'
         }
     }
 }
@@ -88,6 +86,8 @@ def main(input_args=None):
     parser.add_argument('--wavelength_range', nargs='+', type=float, default=[500, 1340, 1500, 1790, 1950, 2450],
                         help='wavelengths to use: None = default for gas, 2x values = min/max pairs of regions')
     parser.add_argument('--co2', action='store_true', help='flag to indicate whether to run co2')
+    parser.add_argument('--software_version', type=str, default=None)
+    parser.add_argument('--product_version', type=str, default=None)
     args = parser.parse_args(input_args)
 
     if args.wavelength_range is not None and len(args.wavelength_range) % 2 != 0:
@@ -132,6 +132,9 @@ def main(input_args=None):
             exit()
             mean_h2o = 1.3
 
+    gas = 'ch4'
+    if args.co2:
+        gas = 'co2'
 
     # Run target generation
     if (os.path.isfile(files.target_file) is False or args.overwrite):
@@ -142,12 +145,9 @@ def main(input_args=None):
                          '--output', files.target_file,
                          '--hdr', radiance_file_hdr,
                          '--lut_dataset', args.lut_file]
-
         if args.co2:
             target_params.append('--co2')
-            gas = 'co2'
-        else:
-            gas = 'ch4'
+
         print(target_params)
 
         target_generation.main(target_params)
@@ -180,20 +180,29 @@ def main(input_args=None):
     # ORT MF
     if (os.path.isfile(files.mf_ort_file) is False or args.overwrite):
         apply_glt.main([args.glt_file, files.mf_file, files.mf_ort_file])
-        subprocess.call(f'gdal_translate {files.mf_ort_file} {files.mf_ort_cog} -of COG',shell=True)
-
+        convert_to_cog(files.mf_ort_file,
+                       files.mf_ort_cog,
+                       metadata[gas]['mf'],
+                       args.software_version,
+                       args.product_version)
     # ORT Sensitivity
     if os.path.isfile(files.sens_ort_file) is False or args.overwrite:
         apply_glt.main([args.glt_file, files.mf_sens_file, files.sens_ort_file])
     if os.path.isfile(files.sens_ort_cog) is False or args.overwrite:
-        subprocess.call(f'gdal_translate {files.sens_ort_file} {files.sens_ort_cog} -of COG',shell=True)
-
+        convert_to_cog(files.sens_ort_file,
+                       files.sens_ort_cog,
+                       metadata[gas]['sens'],
+                       args.software_version,
+                       args.product_version)
     # ORT Uncertainty
     if os.path.isfile(files.uncert_ort_file) is False or args.overwrite:
         apply_glt.main([args.glt_file, files.mf_uncert_file, files.uncert_ort_file])
     if os.path.isfile(files.uncert_ort_cog) is False or args.overwrite:
-        subprocess.call(f'gdal_translate {files.uncert_ort_file} {files.uncert_ort_cog} -of COG',shell=True)
-
+        convert_to_cog(files.uncert_ort_file,
+                       files.uncert_ort_cog,
+                       metadata[gas]['unc'],
+                       args.software_version,
+                       args.product_version)
     # Quicklook MF
     if (os.path.isfile(files.mf_ort_ql) is False or args.overwrite) and args.co2:
         scale.main([files.mf_ort_file, files.mf_ort_ql, '1', '100000', '--cmap', 'viridis'])
