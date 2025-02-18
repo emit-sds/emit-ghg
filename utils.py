@@ -111,6 +111,8 @@ def convert_to_cog(input_file, output_file,product_metadata,software_build_versi
     band = ds_mem.GetRasterBand(1)
     band.SetDescription(product_metadata['name'])
     band.SetMetadataItem("UNITS",product_metadata['units'])
+    band.SetMetadataItem("fill_value",-1)
+
     band.FlushCache()
 
     translate_options = gdal.TranslateOptions(format='COG')
