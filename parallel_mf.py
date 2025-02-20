@@ -231,14 +231,14 @@ def main(input_args=None):
 
         def apply_badvalue(d, mask, bad_data_value, nodata_value=args.nodata_value, buffer=0.1):
             d = d.transpose((0,2,1))
-            nodata = [...,0] == nodata_value
+            nodata = d[...,0] == nodata_value
             
             minbad = np.min([bad_data_value, nodata_value])
             maxbad = np.max([bad_data_value, nodata_value])
             lower_exclude = np.logical_and(d >= minbad, d <= minbad + (maxbad - minbad)/2.0)
             upper_exclude = np.logical_and(d <= maxbad, d >= maxbad - (maxbad - minbad)/2.0)
-            d[lower_exclude] = minbad - buffer
-            d[upper_exclude] = maxbad + buffer
+            d[lower_exclude,:] = minbad - buffer
+            d[upper_exclude,:] = maxbad + buffer
             d[mask,:] = bad_data_value 
             d[nodata,:] = nodata_value
             d = d.transpose((0,2,1))
