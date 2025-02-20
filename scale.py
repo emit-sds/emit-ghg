@@ -20,26 +20,31 @@ import argparse
 import numpy as np
 from osgeo import gdal
 import matplotlib.pyplot as plt
-
+from PIL import Image
 
 def write_output_file(source_ds, output_img, output_file):
-    driver = gdal.GetDriverByName('GTiff')
-    driver.Register()
-    outDataset = driver.Create(output_file,source_ds.RasterXSize,source_ds.RasterYSize,3,gdal.GDT_Byte,options = ['COMPRESS=LZW'])
-    outDataset.SetProjection(source_ds.GetProjection())
-    outDataset.SetGeoTransform(source_ds.GetGeoTransform())
-    for n in range(1,4):
-        if len(output_img.shape) == 2:
-            outDataset.GetRasterBand(n).WriteArray(output_img)
-        else:
-            outDataset.GetRasterBand(n).WriteArray(output_img[...,n-1])
-        outDataset.GetRasterBand(n).SetNoDataValue(0)
-    del outDataset
+    if output_file.lower().endswith('.png'):
+        img = Image.fromarray(output_img.astype('uint8'), mode='RGB')
+        img.save(output_file, format='PNG')
+    else:
+        driver_name = 'GTiff'
+        driver = gdal.GetDriverByName(driver_name)
+        driver.Register()
+        outDataset = driver.Create(output_file,source_ds.RasterXSize,source_ds.RasterYSize,3,gdal.GDT_Byte,options = ['COMPRESS=LZW'])
+        outDataset.SetProjection(source_ds.GetProjection())
+        outDataset.SetGeoTransform(source_ds.GetGeoTransform())
 
+        for n in range(1,4):
+            if len(output_img.shape) == 2:
+                outDataset.GetRasterBand(n).WriteArray(output_img)
+            else:
+                outDataset.GetRasterBand(n).WriteArray(output_img[...,n-1])
+            outDataset.GetRasterBand(n).SetNoDataValue(0)
+        del outDataset
 
 
 def main(input_args=None):
-    parser = argparse.ArgumentParser(description="Robust MF")
+    parser = argparse.ArgumentParser(description="Scale input images")
     parser.add_argument('input_file', type=str,  metavar='INPUT', help='path to input image')   
     parser.add_argument('output_file', type=str,  metavar='OUTPUT', help='path to input image')   
     parser.add_argument('bounds', type=float,  nargs=2, metavar='SCALING RANGE', help='path to input image')   
@@ -52,7 +57,7 @@ def main(input_args=None):
     dat[dat == ds.GetRasterBand(1).GetNoDataValue()] = np.nan
 
     print(args.cmap)
-    print(f'scsaling bounds: {args.bounds}')
+    print(f'scaling bounds: {args.bounds}')
     if args.cmap is None:
         dat -= args.bounds[0]
         dat /= (args.bounds[1] - args.bounds[0])
