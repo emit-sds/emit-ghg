@@ -67,6 +67,7 @@ def main(input_args=None):
     parser.add_argument('--ace_filter', action='store_true', help='Use the Adaptive Cosine Estimator (ACE) Filter')    
     parser.add_argument('--target_scaling', type=str,choices=['mean','pixel'],default='mean', help='value to scale absorption coefficients by')    
     parser.add_argument('--nodata_value', type=float, default=-9999, help='output nodata value')         
+    parser.add_argument('--screen_value', type=float, default=-9998, help='value assigned to screened out pixels')         
     parser.add_argument('--flare_outfile', type=str, default=None, help='output geojson to write flare location centers')         
     parser.add_argument('--chunksize', type=int, default=None, help='chunk radiance (for memory issues with large scenes)')         
     parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
@@ -230,30 +231,30 @@ def main(input_args=None):
 
         def apply_badvalue(d, mask, bad_data_value):
             d = d.transpose((0,2,1))
-            d[mask,:] = bad_data_value # could be nodata, but setting to 0 keeps maps continuous
+            d[mask,:] = bad_data_value 
             d = d.transpose((0,2,1))
             return d
     
         if args.mask_clouds_water and clouds_and_surface_water_mask is not None:
             logging.info('Masking clouds and water')
-            output_dat = apply_badvalue(output_dat, clouds_and_surface_water_mask, 0) # could be nodata, but setting to 0 keeps maps continuous
-            output_uncert_dat = apply_badvalue(output_uncert_dat, clouds_and_surface_water_mask, 0) # could be nodata, but setting to 0 keeps maps continuous
-            output_sens_dat = apply_badvalue(output_sens_dat, clouds_and_surface_water_mask, 0) # could be nodata, but setting to 0 keeps maps continuous
+            output_dat = apply_badvalue(output_dat, clouds_and_surface_water_mask, args.screen_value) 
+            output_uncert_dat = apply_badvalue(output_uncert_dat, clouds_and_surface_water_mask, args.screen_value) 
+            output_sens_dat = apply_badvalue(output_sens_dat, clouds_and_surface_water_mask, args.screen_value) 
 
         if args.mask_saturation and saturation is not None:
             logging.info('Masking saturation')
-            output_dat = apply_badvalue(output_dat, saturation, 0) # could be nodata, but setting to 0 keeps maps continuous
-            output_uncert_dat = apply_badvalue(output_uncert_dat, saturation, 0) # could be nodata, but setting to 0 keeps maps continuous
-            output_sens_dat = apply_badvalue(output_sens_dat, saturation, 0) # could be nodata, but setting to 0 keeps maps continuous
+            output_dat = apply_badvalue(output_dat, saturation, args.screen_value) 
+            output_uncert_dat = apply_badvalue(output_uncert_dat, saturation, args.screen_value) 
+            output_sens_dat = apply_badvalue(output_sens_dat, saturation, args.screen_value) 
 
         if args.mask_flares and saturation is not None:
             logging.info('Masking saturation')
-            output_dat = apply_badvalue(output_dat, dilated_saturation, -1) # could be nodata, but setting to 0 keeps maps continuous
-            output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_saturation, -1) # could be nodata, but setting to 0 keeps maps continuous
-            output_sens_dat = apply_badvalue(output_sens_dat, dilated_saturation, -1) # could be nodata, but setting to 0 keeps maps continuous
-            output_dat = apply_badvalue(output_dat, dilated_flare_mask, -1) # could be nodata, but setting to 0 keeps maps continuous
-            output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_flare_mask, -1) # could be nodata, but setting to 0 keeps maps continuous
-            output_sens_dat = apply_badvalue(output_sens_dat, dilated_flare_mask, -1) # could be nodata, but setting to 0 keeps maps continuous
+            output_dat = apply_badvalue(output_dat, dilated_saturation, args.screen_value) 
+            output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_saturation, args.screen_value) 
+            output_sens_dat = apply_badvalue(output_sens_dat, dilated_saturation, args.screen_value) 
+            output_dat = apply_badvalue(output_dat, dilated_flare_mask, args.screen_value) 
+            output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_flare_mask, args.screen_value) 
+            output_sens_dat = apply_badvalue(output_sens_dat, dilated_flare_mask, args.screen_value) 
 
         write_bil_chunk(output_dat, args.output_file, ce, chunk_shape)
         if args.uncert_output_file is not None:
@@ -540,8 +541,12 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
         if args.uncert_output_file is not None:
             uncert_mc[no_radiance_mask,_mc] = uncert * args.ppm_scaling
     
+    # clip values above this value
+    clip_value = np.max([args.nodata_value, args.screen_value])
+
     output = np.vstack([np.mean(mf_mc,axis=-1), np.std(mf_mc,axis=-1)]).T
     output[np.logical_not(no_radiance_mask),:] = args.nodata_value
+    output[np.logical_and.reduce((output <= clip_value, output != args.nodata_value, output != args.screen_value))] = clip_value + 0.1
 
     if args.uncert_output_file is not None:
         uncert = uncert_mc[:,0]
@@ -550,6 +555,10 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
         sens = sens_mc[:,0]
         sens[np.logical_not(no_radiance_mask)] = args.nodata_value
         sens[np.logical_not(np.isfinite(uncert))] = args.nodata_value
+
+        uncert[np.logical_and.reduce((uncert <= clip_value, uncert != args.nodata_value, uncert != args.screen_value))] = clip_value + 0.1
+        sens[np.logical_and.reduce((sens <= clip_value, sens != args.nodata_value, sens != args.screen_value))] = clip_value + 0.1
+
     else:
         #uncert = np.ones(rdn.shape[0]) * args.nodata_value
         #sens = np.ones(rdn.shape[0]) * args.nodata_value
