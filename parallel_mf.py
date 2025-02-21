@@ -67,7 +67,7 @@ def main(input_args=None):
     parser.add_argument('--ace_filter', action='store_true', help='Use the Adaptive Cosine Estimator (ACE) Filter')    
     parser.add_argument('--target_scaling', type=str,choices=['mean','pixel'],default='mean', help='value to scale absorption coefficients by')    
     parser.add_argument('--nodata_value', type=float, default=-9999, help='output nodata value')         
-    parser.add_argument('--screen_value', type=float, default=-9998, help='value assigned to screened out pixels')         
+    parser.add_argument('--screen_value', type=float, default=-9999, help='value assigned to screened out pixels')         
     parser.add_argument('--flare_outfile', type=str, default=None, help='output geojson to write flare location centers')         
     parser.add_argument('--chunksize', type=int, default=None, help='chunk radiance (for memory issues with large scenes)')         
     parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
@@ -229,18 +229,9 @@ def main(input_args=None):
                 if ret[3] is not None:
                     output_sens_dat[:, 0, ret[1]] = ret[3][:]
 
-        def apply_badvalue(d, mask, bad_data_value, nodata_value=args.nodata_value, buffer=0.1):
+        def apply_badvalue(d, mask, bad_data_value):
             d = d.transpose((0,2,1))
-            nodata = d[...,0] == nodata_value
-            
-            minbad = np.min([bad_data_value, nodata_value])
-            maxbad = np.max([bad_data_value, nodata_value])
-            lower_exclude = np.logical_and(d >= minbad, d <= minbad + (maxbad - minbad)/2.0)
-            upper_exclude = np.logical_and(d <= maxbad, d >= maxbad - (maxbad - minbad)/2.0)
-            d[lower_exclude,:] = minbad - buffer
-            d[upper_exclude,:] = maxbad + buffer
             d[mask,:] = bad_data_value 
-            d[nodata,:] = nodata_value
             d = d.transpose((0,2,1))
             return d
 
@@ -463,7 +454,7 @@ def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, rad
 
 
 @ray.remote
-def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.array, active_wl_idx: np.array, good_pixel_mask: np.array, noise_model_parameters: np.array, args):
+def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.array, active_wl_idx: np.array, good_pixel_mask: np.array, noise_model_parameters: np.array, args, nd_buffer=0.1):
     """ Run the matched filter on a single column of the input image
 
     Args:
@@ -474,6 +465,7 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
         active_wl_idx (np.array): active wavelength indices
         good_pixel_mask (np.array): mask of valid pixels to use for covariance / mean estimates
         args (_type_): arguments from input
+        nd_buffer (float, optional): buffer value to add to values that accidentily land on nodata values. Defaults to 0.1.
 
     Returns:
         (np.array): matched filter results from the column
@@ -553,13 +545,16 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
     
 
     output = np.vstack([np.mean(mf_mc,axis=-1), np.std(mf_mc,axis=-1)]).T
+    output[np.logical_and(no_radiance_mask, output[...,0] == args.nodata_value),:] = args.nodata_value + nd_buffer
     output[np.logical_not(no_radiance_mask),:] = args.nodata_value
 
     if args.uncert_output_file is not None:
         uncert = uncert_mc[:,0]
+        uncert[np.logical_and(no_radiance_mask, uncert == args.nodata_value)] = args.nodata_value + nd_buffer
         uncert[np.logical_not(no_radiance_mask)] = args.nodata_value
         uncert[np.logical_not(np.isfinite(uncert))] = args.nodata_value
         sens = sens_mc[:,0]
+        sens[np.logical_and(no_radiance_mask, sens == args.nodata_value)] = args.nodata_value + nd_buffer
         sens[np.logical_not(no_radiance_mask)] = args.nodata_value
         sens[np.logical_not(np.isfinite(uncert))] = args.nodata_value
     else:
