@@ -87,7 +87,7 @@ def convert_to_cog(input_file, output_file,product_metadata,software_build_versi
     metadata['platform'] = "ISS"
     metadata['Conventions'] = "CF-1.63"
     metadata['institution'] = "NASA Jet Propulsion Laboratory/California Institute of Technology"
-    metadata['license'] = "https://science.nasa.gov/earth-science/earth-science-data/data-information-policy/"
+    metadata['license'] = "https://creativecommons.org/publicdomain/zero/1.0/"
     metadata['naming_authority'] = "LPDAAC"
     metadata['date_created'] = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
     metadata['keywords_vocabulary'] = "NASA Global Change Master Directory (GCMD) Science Keywords"
@@ -111,7 +111,6 @@ def convert_to_cog(input_file, output_file,product_metadata,software_build_versi
     band = ds_mem.GetRasterBand(1)
     band.SetDescription(product_metadata['name'])
     band.SetMetadataItem("UNITS",product_metadata['units'])
-    band.SetMetadataItem("fill_value","-1")
 
     band.FlushCache()
 
