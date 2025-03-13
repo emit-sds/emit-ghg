@@ -17,8 +17,11 @@
 # Authors: Philip G. Brodrick, philip.brodrick@jpl.nasa.gov
 
 import os
-import numpy as np
+import datetime
 import json
+
+import numpy as np
+from osgeo import gdal
 
 def envi_header(inputpath):
     """
@@ -75,3 +78,43 @@ class SerialEncoder(json.JSONEncoder):
         else:
             return super(SerialEncoder, self).default(obj)
 
+def convert_to_cog(input_file, output_file,product_metadata,software_build_version,product_version):
+
+    metadata = {}
+    metadata['keywords'] = "Imaging Spectroscopy, minerals, EMIT, dust, radiative forcing"
+    metadata['sensor'] = "EMIT (Earth Surface Mineral Dust Source Investigation)"
+    metadata['instrument'] = "EMIT"
+    metadata['platform'] = "ISS"
+    metadata['Conventions'] = "CF-1.63"
+    metadata['institution'] = "NASA Jet Propulsion Laboratory/California Institute of Technology"
+    metadata['license'] = "https://creativecommons.org/publicdomain/zero/1.0/"
+    metadata['naming_authority'] = "LPDAAC"
+    metadata['date_created'] = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
+    metadata['keywords_vocabulary'] = "NASA Global Change Master Directory (GCMD) Science Keywords"
+    metadata['stdname_vocabulary'] = "NetCDF Climate and Forecast (CF) Metadata Convention"
+    metadata['creator_name'] = "Jet Propulsion Laboratory/California Institute of Technology"
+    metadata['creator_url'] = "https://earth.jpl.nasa.gov/emit/"
+    metadata['project'] = "Earth Surface Mineral Dust Source Investigation"
+    metadata['project_url'] = "https://earth.jpl.nasa.gov/emit/"
+    metadata['publisher_name'] = "NASA LPDAAC"
+    metadata['publisher_url'] = "https://lpdaac.usgs.gov"
+    metadata['publisher_email'] = "lpdaac@usgs.gov"
+    metadata['identifier_product_doi_authority'] = "https://doi.org"
+    metadata['software_build_version'] = software_build_version
+    metadata['product_version'] = product_version
+
+    metadata['description'] = product_metadata['description']
+
+    ds_mem = gdal.Translate('', input_file, format='MEM')
+    ds_mem.SetMetadata(metadata)
+
+    band = ds_mem.GetRasterBand(1)
+    band.SetDescription(product_metadata['name'])
+    band.SetMetadataItem("UNITS",product_metadata['units'])
+
+    band.FlushCache()
+
+    translate_options = gdal.TranslateOptions(format='COG')
+    gdal.Translate(output_file, ds_mem, options=translate_options)
+
+    ds_mem = None

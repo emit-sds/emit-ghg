@@ -28,8 +28,8 @@ import h5py
 
 def check_param(value, min, max, name):
     if value < min or value > max:
-        raise ValueError('The value for {name} exceeds the sampled parameter space.'
-                         'The limits are[{min}, {max}], requested {value}.')
+        raise ValueError(f'The value for {name} exceeds the sampled parameter space.'
+                         f'The limits are[{min}, {max}], requested {value}.')
 
 
 @np.vectorize

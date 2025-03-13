@@ -67,6 +67,7 @@ def main(input_args=None):
     parser.add_argument('--ace_filter', action='store_true', help='Use the Adaptive Cosine Estimator (ACE) Filter')    
     parser.add_argument('--target_scaling', type=str,choices=['mean','pixel'],default='mean', help='value to scale absorption coefficients by')    
     parser.add_argument('--nodata_value', type=float, default=-9999, help='output nodata value')         
+    parser.add_argument('--screen_value', type=float, default=-9999, help='value assigned to screened out pixels')         
     parser.add_argument('--flare_outfile', type=str, default=None, help='output geojson to write flare location centers')         
     parser.add_argument('--chunksize', type=int, default=None, help='chunk radiance (for memory issues with large scenes)')         
     parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
@@ -230,30 +231,31 @@ def main(input_args=None):
 
         def apply_badvalue(d, mask, bad_data_value):
             d = d.transpose((0,2,1))
-            d[mask,:] = bad_data_value # could be nodata, but setting to 0 keeps maps continuous
+            d[mask,:] = bad_data_value 
             d = d.transpose((0,2,1))
             return d
-    
+
+
         if args.mask_clouds_water and clouds_and_surface_water_mask is not None:
             logging.info('Masking clouds and water')
-            output_dat = apply_badvalue(output_dat, clouds_and_surface_water_mask, 0) # could be nodata, but setting to 0 keeps maps continuous
-            output_uncert_dat = apply_badvalue(output_uncert_dat, clouds_and_surface_water_mask, 0) # could be nodata, but setting to 0 keeps maps continuous
-            output_sens_dat = apply_badvalue(output_sens_dat, clouds_and_surface_water_mask, 0) # could be nodata, but setting to 0 keeps maps continuous
+            output_dat = apply_badvalue(output_dat, clouds_and_surface_water_mask, args.screen_value) 
+            output_uncert_dat = apply_badvalue(output_uncert_dat, clouds_and_surface_water_mask, args.screen_value) 
+            output_sens_dat = apply_badvalue(output_sens_dat, clouds_and_surface_water_mask, args.screen_value) 
 
         if args.mask_saturation and saturation is not None:
             logging.info('Masking saturation')
-            output_dat = apply_badvalue(output_dat, saturation, 0) # could be nodata, but setting to 0 keeps maps continuous
-            output_uncert_dat = apply_badvalue(output_uncert_dat, saturation, 0) # could be nodata, but setting to 0 keeps maps continuous
-            output_sens_dat = apply_badvalue(output_sens_dat, saturation, 0) # could be nodata, but setting to 0 keeps maps continuous
+            output_dat = apply_badvalue(output_dat, saturation, args.screen_value) 
+            output_uncert_dat = apply_badvalue(output_uncert_dat, saturation, args.screen_value) 
+            output_sens_dat = apply_badvalue(output_sens_dat, saturation, args.screen_value) 
 
         if args.mask_flares and saturation is not None:
             logging.info('Masking saturation')
-            output_dat = apply_badvalue(output_dat, dilated_saturation, -1) # could be nodata, but setting to 0 keeps maps continuous
-            output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_saturation, -1) # could be nodata, but setting to 0 keeps maps continuous
-            output_sens_dat = apply_badvalue(output_sens_dat, dilated_saturation, -1) # could be nodata, but setting to 0 keeps maps continuous
-            output_dat = apply_badvalue(output_dat, dilated_flare_mask, -1) # could be nodata, but setting to 0 keeps maps continuous
-            output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_flare_mask, -1) # could be nodata, but setting to 0 keeps maps continuous
-            output_sens_dat = apply_badvalue(output_sens_dat, dilated_flare_mask, -1) # could be nodata, but setting to 0 keeps maps continuous
+            output_dat = apply_badvalue(output_dat, dilated_saturation, args.screen_value) 
+            output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_saturation, args.screen_value) 
+            output_sens_dat = apply_badvalue(output_sens_dat, dilated_saturation, args.screen_value) 
+            output_dat = apply_badvalue(output_dat, dilated_flare_mask, args.screen_value) 
+            output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_flare_mask, args.screen_value) 
+            output_sens_dat = apply_badvalue(output_sens_dat, dilated_flare_mask, args.screen_value) 
 
         write_bil_chunk(output_dat, args.output_file, ce, chunk_shape)
         if args.uncert_output_file is not None:
@@ -452,7 +454,7 @@ def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, rad
 
 
 @ray.remote
-def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.array, active_wl_idx: np.array, good_pixel_mask: np.array, noise_model_parameters: np.array, args):
+def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.array, active_wl_idx: np.array, good_pixel_mask: np.array, noise_model_parameters: np.array, args, nd_buffer=0.1):
     """ Run the matched filter on a single column of the input image
 
     Args:
@@ -463,6 +465,7 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
         active_wl_idx (np.array): active wavelength indices
         good_pixel_mask (np.array): mask of valid pixels to use for covariance / mean estimates
         args (_type_): arguments from input
+        nd_buffer (float, optional): buffer value to add to values that accidentily land on nodata values. Defaults to 0.1.
 
     Returns:
         (np.array): matched filter results from the column
@@ -540,14 +543,18 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
         if args.uncert_output_file is not None:
             uncert_mc[no_radiance_mask,_mc] = uncert * args.ppm_scaling
     
+
     output = np.vstack([np.mean(mf_mc,axis=-1), np.std(mf_mc,axis=-1)]).T
+    output[np.logical_and(no_radiance_mask, output[...,0] == args.nodata_value),:] = args.nodata_value + nd_buffer
     output[np.logical_not(no_radiance_mask),:] = args.nodata_value
 
     if args.uncert_output_file is not None:
         uncert = uncert_mc[:,0]
+        uncert[np.logical_and(no_radiance_mask, uncert == args.nodata_value)] = args.nodata_value + nd_buffer
         uncert[np.logical_not(no_radiance_mask)] = args.nodata_value
         uncert[np.logical_not(np.isfinite(uncert))] = args.nodata_value
         sens = sens_mc[:,0]
+        sens[np.logical_and(no_radiance_mask, sens == args.nodata_value)] = args.nodata_value + nd_buffer
         sens[np.logical_not(no_radiance_mask)] = args.nodata_value
         sens[np.logical_not(np.isfinite(uncert))] = args.nodata_value
     else:
