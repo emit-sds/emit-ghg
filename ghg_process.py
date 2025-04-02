@@ -37,12 +37,12 @@ metadata = {
             'units': 'ppm m'
         },
         'sens': {
-            'name': 'EMIT_L2B_CH4SNS',
+            'name': 'EMIT_L2B_CH4SENS',
             'description': 'Methane Enhancement Sensitivity Values',
             'units': 'unitless'
         },
         'unc': {
-            'name': 'EMIT_L2B_CH4UNC',
+            'name': 'EMIT_L2B_CH4UNCERT',
             'description': 'Methane Enhancement Uncertainty Values',
             'units':  'ppm m'
         }
@@ -54,12 +54,12 @@ metadata = {
             'units': 'ppm m'
         },
         'sens': {
-            'name': 'EMIT_L2B_CO2SNS',
+            'name': 'EMIT_L2B_CO2SENS',
             'description': 'Carbon Dioxide Enhancement Sensitivity Values',
             'units': 'unitless'
         },
         'unc': {
-            'name': 'EMIT_L2B_CO2UNC',
+            'name': 'EMIT_L2B_CO2UNCERT',
             'description': 'Carbon Dioxide Enhancement Uncertainty Values',
             'units': 'ppm m'
         }
