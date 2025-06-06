@@ -81,8 +81,22 @@ def track_features_with_optical_flow(frames, prefix,thresh=150):
         
         use = np.array(use,dtype=int)
         motion_vectors = motion_vectors[use,:]
-        avg_velocity = np.median(motion_vectors, axis=0)
-        print(f"Frame {i}: median velocity = {avg_velocity} pixels/frame")
+
+        # Our estimate is the median
+        median_velocity = np.median(motion_vectors, axis=0)
+
+        # Bootstrap uncertainties
+        bootstrap_medians = []
+        nboot = 10000
+        for iteration in range(nboot):
+            samples = np.random.choice(np.arange(motion_vectors.shape[0]), 
+                size=motion_vectors.shape[0])
+            my_median = np.median(motion_vectors[samples,:], axis=0)
+            bootstrap_medians.append(my_median)
+        bootstrap_medians = np.array(bootstrap_medians) 
+        np.savetxt('output/%s_frame_%i_boot.csv'%(prefix,i),bootstrap_medians,delimiter=',',fmt='%10.8f')
+       
+        print(f"Frame {i}: median velocity = {median_velocity} pixels/frame")
   
         gpx.fit(good_next, good_prev[:,0])
         gpy.fit(good_next, good_prev[:,1])
@@ -94,7 +108,9 @@ def track_features_with_optical_flow(frames, prefix,thresh=150):
         ypred = gpy.predict(np.c_[gridx,gridy])
                 
         # Visualize the tracked points and motion vectors with GP
-        output_frame = cv2.cvtColor(np.array(curr_gray/2+100,dtype=np.uint8), cv2.COLOR_GRAY2BGR)
+        resize_factor = 5
+        large = cv2.resize(prev_gray,np.array([prev_gray.shape[1],prev_gray.shape[0]])*resize_factor)
+        output_frame = cv2.cvtColor(np.array(155+large/3,dtype=np.uint8), cv2.COLOR_GRAY2BGR)
         for ny, nx, py, px in zip(ypred,xpred,gridy.flatten(), gridx.flatten()):
             
             dist_to_source = np.sqrt(pow(ny-source[1],2)+pow(nx-source[0],2))
@@ -103,13 +119,14 @@ def track_features_with_optical_flow(frames, prefix,thresh=150):
             if blur_prev[int(py),int(px)] > thresh and \
                 blur_next[int(ny),int(nx)] > thresh and py>ycutoff[0] and py<ycutoff[1] and \
                 manual_mask[py,px]<1:
-                cv2.arrowedLine(output_frame, (int(nx), int(ny)), (int(px), int(py)), (0,0,192), 2)
+                cv2.arrowedLine(output_frame, (int(nx*resize_factor), int(ny*resize_factor)), 
+                        (int(px*resize_factor), int(py*resize_factor)), (40,40,192), 12)
  
         cv2.imwrite("output/%s_frame_%i.png"%(prefix,i),output_frame)
         cv2.imwrite("output/%s_frame_%i_gray.png"%(prefix,i),curr_gray)
         
         # Now plot Lucas Kanade track
-        output_frame = cv2.cvtColor(np.array(curr_gray/2+100,dtype=np.uint8), cv2.COLOR_GRAY2BGR)
+        output_frame = cv2.cvtColor(np.array(125+large/2,dtype=np.uint8), cv2.COLOR_GRAY2BGR)
         for p1, p2 in zip(good_prev[use], good_next[use]):
             x1, y1 = p1.ravel()
             x2, y2 = p2.ravel()
