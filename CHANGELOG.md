@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. Dates are displayed in UTC.
 
+#### [v0.3.4](https://github.com/emit-sds/emit-ghg/compare/v0.3.3...v0.3.4)
+
+> 24 June 2025
+
+* Added mosaicking script by @adamchlus in https://github.com/emit-sds/emit-ghg/pull/41
+
 #### [v0.3.3](https://github.com/emit-sds/emit-ghg/compare/v0.3.2...v0.3.3)
 
 > 2 April 2025
