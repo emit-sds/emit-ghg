@@ -28,11 +28,8 @@ def main():
     parser.add_argument('dates', type=str, nargs='+')
     parser.add_argument('--sourcedir', type=str, default='methane_20230813')
     parser.add_argument('--type', type=str, default='ch4', choices=['co2','ch4'])
+    parser.add_argument('--acquisitions_dir', type=str, default='/store/emit/ops/data/acquisitions')
     args = parser.parse_args()
-
-    path = os.environ['PATH']
-    path = path.replace('\Library\\bin;',':')
-    os.environ['PATH'] = path
 
     tiled_basedir = os.path.join(args.sourcedir, f'{args.type}_mosaic_temporal_static')
     sens_basedir = os.path.join(args.sourcedir, f'{args.type}_sens_mosaic_temporal_static')
@@ -43,7 +40,7 @@ def main():
 
 
     if args.dates[0] == 'all':
-        dates = [os.path.basename(x) for x in glob.glob('/beegfs/store/emit/ops/data/acquisitions/202*')]
+        dates = [os.path.basename(x) for x in glob.glob(os.path.join(args.acquisitions_dir,'202*'))]
     else:
         dates = args.dates
 
@@ -65,9 +62,9 @@ def main():
         od_date = f'{date[:4]}-{date[4:6]}-{date[6:8]}T00_00_01Z-to-{date[:4]}-{date[4:6]}-{date[6:8]}T23_59_59Z'
 
         
-        subprocess.call(f'sbatch -N 1 -c 40 --mem=180G --job-name {args.type}_tile_{date} --wrap="python daily_tiler.py {static_file_list} {os.path.join(tiled_basedir, od_date)}"',shell=True)
-        subprocess.call(f'sbatch -N 1 -c 40 --mem=180G --job-name {args.type}_tile_{date} --wrap="python daily_tiler.py {sens_file_list}   {os.path.join(sens_basedir, od_date)}"',shell=True)
-        subprocess.call(f'sbatch -N 1 -c 40 --mem=180G --job-name {args.type}_tile_{date} --wrap="python daily_tiler.py {uncert_file_list} {os.path.join(uncert_basedir, od_date)}"',shell=True)
+        subprocess.call(f'sbatch -N 1 -c 64 --mem=370G --job-name {args.type}_tile_{date} --wrap="python daily_tiler.py {static_file_list} {os.path.join(tiled_basedir, od_date)}"',shell=True)
+        subprocess.call(f'sbatch -N 1 -c 64 --mem=370G --job-name {args.type}_tile_{date} --wrap="python daily_tiler.py {sens_file_list}   {os.path.join(sens_basedir, od_date)}"',shell=True)
+        subprocess.call(f'sbatch -N 1 -c 64 --mem=370G --job-name {args.type}_tile_{date} --wrap="python daily_tiler.py {uncert_file_list} {os.path.join(uncert_basedir, od_date)}"',shell=True)
 
         
 
