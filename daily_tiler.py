@@ -31,7 +31,6 @@ def main(rawargs=None):
     parser = argparse.ArgumentParser(description="Daily Tiler")
     parser.add_argument('file_list',type=str)
     parser.add_argument('output_dest', type=str)
-    parser.add_argument('--dynamic', action='store_true')
     args = parser.parse_args(rawargs)
 
     files = open(args.file_list,'r').readlines()
@@ -42,10 +41,7 @@ def main(rawargs=None):
         count = 0
         success=False
         
-        if args.dynamic:
-            subprocess.call(f'python /beegfs/scratch/brodrick/emit/MMGIS/auxiliary/gdal2customtiles/gdal2tiles_3.5.2.py --dem {fi} {args.output_dest} -r near-composite -z 5-11 --srcnodata=-9999 --processes=40 && echo {fi} >> {os.path.splitext(args.file_list)[0] + "_completed.txt"}',shell=True)
-        else:
-            subprocess.call(f'gdal2tiles.py {fi} {args.output_dest} -z 4-12 --srcnodata 0 --processes=40 -r antialias -x && echo {fi} >> {os.path.splitext(args.file_list)[0] + "_completed.txt"}',shell=True)
+        subprocess.call(f'gdal2tiles.py {fi} {args.output_dest} -z 4-12 --srcnodata 0 --processes=40 -r antialias -x && echo {fi} >> {os.path.splitext(args.file_list)[0] + "_completed.txt"}',shell=True)
 
 
 
