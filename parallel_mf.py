@@ -238,8 +238,10 @@ def main(input_args=None):
                     output_sens_dat[:, 0, ret[1]] = ret[3][:]
 
         end_mf_one_col = time.time()
-        logging.info(f'asdf full scene time: {end_mf_full_scene - start_mf_full_scene}')
-        logging.info(f'asdf one col time: {end_mf_one_col - start_mf_one_col}')
+        logging.info(f'full scene time: {end_mf_full_scene - start_mf_full_scene}')
+        logging.info(f'one col time: {end_mf_one_col - start_mf_one_col}')
+
+        logging.info(f'np.allclose: {np.allclose(output_dat[:,0,:], output_dat2)}')
 
         np.save('/store/jfahlen/test/test_parallel/mf_full_scene.npy', output_dat2)
         np.save('/store/jfahlen/test/test_parallel/mf_one_column.npy', output_dat)
@@ -470,20 +472,23 @@ def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, rad
     nedl = np.abs(noise_model_parameters[:, 0] * np.sqrt(noise_plus_meas) + noise_model_parameters[:, 2])
     return nedl
 
-def mf_full_scene(rdn_full, absorption_coefficients, active_wl_idx, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
+def mf_full_scene(rdn_full_in, absorption_coefficients, active_wl_idx, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
     #rdn_full nalong, nspec, ncross
+    rdn_full = np.float64(rdn_full_in).copy()
     nalong, nspec, ncross = rdn_full.shape
+
 
     # array to hold results in
     mf = np.ones((nalong, ncross)) * args.nodata_value
     uncert = np.ones((nalong, ncross)) * args.nodata_value
     sens = np.ones((nalong, ncross)) * args.nodata_value
 
-    no_radiance_mask_full = np.all(np.logical_and(np.isfinite(rdn_full), rdn_full > -0.05), axis=1)
+    no_radiance_mask_full = np.all(np.logical_and(np.isfinite(rdn_full[:,active_wl_idx,:]), rdn_full[:,active_wl_idx,:] > -0.05), axis=1)
 
     for col in range(ncross):
         rdn_subset = np.ascontiguousarray(rdn_full[:,active_wl_idx,col])
         no_radiance_mask = no_radiance_mask_full[:,col]
+        #no_radiance_mask = np.all(np.logical_and(np.isfinite(rdn_subset), rdn_subset > -0.05), axis=1)
         good_pixel_idx = np.where(np.logical_and(good_pixel_mask[:,col], no_radiance_mask))[0]
         if len(good_pixel_idx) < 10:
             logging.debug('Too few good pixels found in col {col}: skipping')
@@ -500,7 +505,8 @@ def mf_full_scene(rdn_full, absorption_coefficients, active_wl_idx, good_pixel_m
             continue
         mu = np.mean(rdn_subset[good_pixel_idx,:], axis=0)
 
-        target = absorption_coefficients.copy() * np.mean(rdn_subset[good_pixel_idx],axis=0)
+        #target = absorption_coefficients.copy() * np.mean(rdn_subset[good_pixel_idx, :],axis=0)
+        target = absorption_coefficients * mu
 
         # Matched filter time
         normalizer = target.dot(Cinv).dot(target.T)
