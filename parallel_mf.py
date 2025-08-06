@@ -64,7 +64,6 @@ def main(input_args=None):
     parser.add_argument('--mask_saturation',action='store_true', help='mask saturated pixels from output matched filter')         
     parser.add_argument('--mask_flares',action='store_true', help='mask flared pixels from output matched filter')         
     parser.add_argument('--ppm_scaling', type=float, default=100000.0, help='scaling factor to unit convert outputs - based on target')         
-    parser.add_argument('--ace_filter', action='store_true', help='Use the Adaptive Cosine Estimator (ACE) Filter')    
     parser.add_argument('--target_scaling', type=str,choices=['mean','pixel'],default='mean', help='value to scale absorption coefficients by')    
     parser.add_argument('--nodata_value', type=float, default=-9999, help='output nodata value')         
     parser.add_argument('--screen_value', type=float, default=-9999, help='value assigned to screened out pixels')         
@@ -517,10 +516,6 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
 
         # Matched filter time
         normalizer = target.dot(Cinv).dot(target.T)
-        if args.ace_filter:
-            rx = np.sum((loc_rdn[no_radiance_mask,:] - mu) @ Cinv * (loc_rdn[no_radiance_mask,:] - mu), axis = 1)
-            normalizer = normalizer * rx
-
         mf = ((loc_rdn[no_radiance_mask,:] - mu).dot(Cinv).dot(target.T)) / normalizer
 
         if args.uncert_output_file is not None:

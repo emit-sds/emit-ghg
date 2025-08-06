@@ -77,7 +77,6 @@ def main(input_args=None):
     parser.add_argument('output_base', type=str,  help='output basepath for output image')
     parser.add_argument('--state_subs', type=str, default=None,  help='state file from OE retrieval')
     parser.add_argument('--overwrite', action='store_true',  help='state file from OE retrieval')
-    parser.add_argument('--ace_filter', action='store_true',  help='use an ACE filter during matched filter')
     parser.add_argument('--loglevel', type=str, default='INFO', help='logging verbosity')
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')
     parser.add_argument('--mask_flares', type=int, default=1, help='mask flares in output')
@@ -173,8 +172,6 @@ def main(input_args=None):
         if args.mask_flares == 1:
             subargs.append('--mask_flares')
 
-        if args.ace_filter:
-            subargs.append('--use_ace_filter')
         parallel_mf.main(subargs)
 
     # ORT MF
