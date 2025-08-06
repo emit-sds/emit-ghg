@@ -35,6 +35,9 @@ from utils import SerialEncoder
 import logging
 import os
 
+import pdb
+import time
+
 # Borrowed from isofit/isofit/wrappers/ray.py
 if os.environ.get("GHG_DEBUG"):
     logging.info("Using internal ray")
@@ -177,7 +180,7 @@ def main(input_args=None):
     rdn_id = None
     absorption_coefficients_id = ray.put(absorption_coefficients)
     noise_model_parameters_id = ray.put(noise_model_parameters)
-    del absorption_coefficients, noise_model_parameters
+    #del absorption_coefficients, noise_model_parameters
     for _ce, ce in enumerate(chunk_edges[:-1]):
         
         if rdn_id is not None:
@@ -211,9 +214,14 @@ def main(input_args=None):
         logging.info('initializing ray, adding data to shared memory')
 
         rdn_id = ray.put(radiance)
-        del radiance
+        #del radiance
+
+        start_mf_full_scene = time.time()
+        output_dat2, output_uncert_dat2, output_sens_dat2 = mf_full_scene(radiance, absorption_coefficients, active_wl_idx, good_pixel_mask, noise_model_parameters, args)
+        end_mf_full_scene = time.time()
 
         logging.info('Run jobs')
+        start_mf_one_col = time.time()
         jobs = [mf_one_column.remote(col, rdn_id, absorption_coefficients_id, active_wl_idx, good_pixel_mask, noise_model_parameters_id, args) for col in range(output_shape[2])]
         rreturn = [ray.get(jid) for jid in jobs]
 
@@ -228,6 +236,16 @@ def main(input_args=None):
                     output_uncert_dat[:, 0, ret[1]] = ret[2][:]
                 if ret[3] is not None:
                     output_sens_dat[:, 0, ret[1]] = ret[3][:]
+
+        end_mf_one_col = time.time()
+        logging.info(f'asdf full scene time: {end_mf_full_scene - start_mf_full_scene}')
+        logging.info(f'asdf one col time: {end_mf_one_col - start_mf_one_col}')
+
+        np.save('/store/jfahlen/test/test_parallel/mf_full_scene.npy', output_dat2)
+        np.save('/store/jfahlen/test/test_parallel/mf_one_column.npy', output_dat)
+        
+
+        pdb.set_trace()
 
         def apply_badvalue(d, mask, bad_data_value):
             d = d.transpose((0,2,1))
@@ -452,6 +470,80 @@ def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, rad
     nedl = np.abs(noise_model_parameters[:, 0] * np.sqrt(noise_plus_meas) + noise_model_parameters[:, 2])
     return nedl
 
+def mf_full_scene(rdn_full, absorption_coefficients, active_wl_idx, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
+    #rdn_full nalong, nspec, ncross
+    nalong, nspec, ncross = rdn_full.shape
+
+    # array to hold results in
+    mf = np.ones((nalong, ncross)) * args.nodata_value
+    uncert = np.ones((nalong, ncross)) * args.nodata_value
+    sens = np.ones((nalong, ncross)) * args.nodata_value
+
+    no_radiance_mask_full = np.all(np.logical_and(np.isfinite(rdn_full), rdn_full > -0.05), axis=1)
+
+    for col in range(ncross):
+        rdn_subset = np.ascontiguousarray(rdn_full[:,active_wl_idx,col])
+        no_radiance_mask = no_radiance_mask_full[:,col]
+        good_pixel_idx = np.where(np.logical_and(good_pixel_mask[:,col], no_radiance_mask))[0]
+        if len(good_pixel_idx) < 10:
+            logging.debug('Too few good pixels found in col {col}: skipping')
+            continue
+
+        if args.uncert_output_file is not None:
+            nedl_variance = (get_noise_equivalent_spectral_radiance(noise_model_parameters, rdn_subset))**2
+    
+        try:
+            C = calculate_mf_covariance(rdn_subset[good_pixel_idx,:], args.covariance_style, args.fixed_alpha)
+            Cinv = scipy.linalg.inv(C, check_finite=False)
+        except np.linalg.LinAlgError:
+            logging.warn('singular matrix. skipping this column')
+            continue
+        mu = np.mean(rdn_subset[good_pixel_idx,:], axis=0)
+
+        target = absorption_coefficients.copy() * np.mean(rdn_subset[good_pixel_idx],axis=0)
+
+        # Matched filter time
+        normalizer = target.dot(Cinv).dot(target.T)
+
+        mf_col = target.T.dot(Cinv).dot((rdn_subset[no_radiance_mask,:] - mu).T) / normalizer
+        #mf_col = (rdn_subset[no_radiance_mask,:] - mu).dot(Cinv).dot(target.T) / normalizer
+
+        if args.uncert_output_file is not None:
+            ####################################################################################################################
+            # Uncertainty
+            # This implements (s^T Cinv Sigma Cinv s) / (s^T Cinv aX) (in linear algebra notation)
+            # Sigma is diagonal, so we just need a standard numpy multiply, which we can also broadcast along the whole column
+            sC = target.dot(Cinv)
+            numer = (sC * nedl_variance[no_radiance_mask,:]) @ sC
+            a_times_X = -1 * absorption_coefficients.copy() * rdn_subset[no_radiance_mask, :]
+            #denom = ((a_times_X).dot(Cinv).dot(target.T))**2
+            denom = ((target).dot(Cinv).dot(a_times_X.T))**2
+            uncert_col = np.sqrt(numer/denom)
+
+            ####################################################################################################################
+
+            sens_col = np.sqrt(denom) / normalizer
+            #sens_mc[no_radiance_mask,_mc] = np.sqrt(denom) / normalizer
+
+            sens[no_radiance_mask,col] = sens_col
+            uncert[no_radiance_mask,col] = uncert_col * args.ppm_scaling
+        mf[no_radiance_mask,col] = mf_col * args.ppm_scaling
+    
+    mf[np.logical_and(no_radiance_mask_full, mf == args.nodata_value)] = args.nodata_value + nd_buffer
+    mf[np.logical_not(no_radiance_mask_full)] = args.nodata_value
+
+    if args.uncert_output_file is not None:
+        uncert[np.logical_and(no_radiance_mask_full, uncert == args.nodata_value)] = args.nodata_value + nd_buffer
+        uncert[np.logical_not(no_radiance_mask_full)] = args.nodata_value
+        uncert[np.logical_not(np.isfinite(uncert))] = args.nodata_value
+        sens[np.logical_and(no_radiance_mask_full, sens == args.nodata_value)] = args.nodata_value + nd_buffer
+        sens[np.logical_not(no_radiance_mask_full)] = args.nodata_value
+        sens[np.logical_not(np.isfinite(uncert))] = args.nodata_value
+    else:
+        uncert = None
+        sens = None
+
+    return mf.astype(np.float32), uncert, sens
 
 @ray.remote
 def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.array, active_wl_idx: np.array, good_pixel_mask: np.array, noise_model_parameters: np.array, args, nd_buffer=0.1):
