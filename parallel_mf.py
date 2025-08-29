@@ -31,6 +31,9 @@ import numpy as np
 from utils import envi_header, write_bil_chunk
 import json
 from utils import SerialEncoder
+import pdb
+
+import spec_io
 
 import logging
 import os
@@ -92,11 +95,14 @@ def main(input_args=None):
                         filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
    
     logging.info('Started processing input file: "%s"'%str(args.radiance_file))
-    ds = envi.open(envi_header(args.radiance_file),image=args.radiance_file)
-    if 'wavelength' not in ds.metadata:
-        logging.error('wavelength field not found in input header')
-        sys.exit(0)
-    wavelengths = np.array([float(x) for x in ds.metadata['wavelength']])
+    m_radiance, full_radiance = spec_io.load_data(args.radiance_file)
+    full_radiance = np.ascontiguousarray(full_radiance.transpose([0,2,1]))
+    wavelengths = m_radiance.wavelengths
+    #ds = envi.open(envi_header(args.radiance_file),image=args.radiance_file)
+    #if 'wavelength' not in ds.metadata:
+    #    logging.error('wavelength field not found in input header')
+    #    sys.exit(0)
+    #wavelengths = np.array([float(x) for x in ds.metadata['wavelength']])
 
     if args.wavelength_range is None:
         if 'ch4' in args.library:
@@ -136,7 +142,10 @@ def main(input_args=None):
     absorption_coefficients = library_reference[active_wl_idx,2]
 
     logging.info('Create output file, initialized with nodata')
-    outmeta = ds.metadata
+    #outmeta = ds.metadata
+    outmeta = {}
+    outmeta['samples'] = full_radiance.shape[2]
+    outmeta['lines'] = full_radiance.shape[0]
     outmeta['data type'] = np2envitype(np.float32)
     outmeta['bands'] = 1
     outmeta['description'] = 'Matched Filter Results'
@@ -183,7 +192,8 @@ def main(input_args=None):
         if rdn_id is not None:
             del rdn_id; rdn_id = None
         logging.info(f"load radiance for chunk {_ce +1} / {len(chunk_edges) - 1}")
-        radiance = ds.open_memmap(interleave='bil',writeable=False)[ce:chunk_edges[_ce+1],...].copy()
+        #radiance = ds.open_memmap(interleave='bil',writeable=False)[ce:chunk_edges[_ce+1],...].copy()
+        radiance = full_radiance[ce:chunk_edges[_ce+1],...].copy()
         chunk_shape = (chunk_edges[_ce+1] - ce, output_shape[1], output_shape[2])
 
         logging.info("load masks")
@@ -205,7 +215,10 @@ def main(input_args=None):
         logging.debug("adding cloud / water mask")
         clouds_and_surface_water_mask = None
         if args.l2a_mask_file is not None:
-            clouds_and_surface_water_mask = np.sum(envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')[ce:chunk_edges[_ce+1],:,:3],axis=-1) > 0
+            #clouds_and_surface_water_mask = np.sum(envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')[ce:chunk_edges[_ce+1],:,:3],axis=-1) > 0
+            _, clouds_and_surface_water_mask = spec_io.load_data(args.l2a_mask_file)
+            clouds_and_surface_water_mask = clouds_and_surface_water_mask[ce:chunk_edges[_ce+1],:,:3]
+            clouds_and_surface_water_mask = np.sum(clouds_and_surface_water_mask, axis=-1) > 0
             good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
 
         logging.info('initializing ray, adding data to shared memory')
@@ -414,10 +427,14 @@ def calculate_saturation_mask(bandmask_file: str, radiance: np.array, dilation_i
     has been otherwise flagged with bad values (-9999). The bad9999 mask identifies these and
     excludes them.'''
 
-    if chunk_edges is None:
-        l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[:,:,:]
-    else:
-        l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[chunk_edges[0]:chunk_edges[1],:,:]
+    _, l1b_bandmask_loaded = spec_io.load_data(bandmask_file)
+    if chunk_edges is not None:
+        l1b_bandmask_loaded = l1b_bandmask_loaded[chunk_edges[0]:chunk_edges[1],:,:]
+
+    #if chunk_edges is None:
+    #    l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[:,:,:]
+    #else:
+    #    l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[chunk_edges[0]:chunk_edges[1],:,:]
 
     bad9999 = np.any(radiance < -1, axis = 1)
     l1b_bandmask_unpacked = np.unpackbits(l1b_bandmask_loaded, axis= -1)
