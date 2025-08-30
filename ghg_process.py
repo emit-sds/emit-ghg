@@ -19,6 +19,7 @@
 import argparse
 import logging
 import os
+import pdb
 
 import target_generation
 import parallel_mf
@@ -28,6 +29,7 @@ from spectral.io import envi
 import numpy as np
 from utils import envi_header, convert_to_cog
 from files import Filenames
+import spec_io
 
 metadata = {
     'ch4': {
@@ -94,7 +96,10 @@ def main(input_args=None):
         raise ValueError('wavelength_range must have an even number of elements')
 
     radiance_file = args.radiance_file
-    radiance_file_hdr = envi_header(radiance_file)
+    if radiance_file.endswith('.nc'):
+        radiance_file_hdr = radiance_file
+    else:
+        radiance_file_hdr = envi_header(radiance_file)
 
     obs_file = args.obs_file
     obs_file_hdr = envi_header(obs_file)
@@ -115,10 +120,15 @@ def main(input_args=None):
     print(files.target_file)
 
     if os.path.isfile(files.target_file) is False or args.overwrite:
-        sza = envi.open(obs_file_hdr).open_memmap(interleave='bip')[...,4]
+        #sza = envi.open(obs_file_hdr).open_memmap(interleave='bip')[...,4]
+        _, obs = spec_io.load_data(obs_file)
+        sza = obs[...,4]
+
         mean_sza = np.mean(sza[sza != -9999])
 
-        elevation = envi.open(loc_file_hdr).open_memmap(interleave='bip')[...,2]
+        #elevation = envi.open(loc_file_hdr).open_memmap(interleave='bip')[...,2]
+        _, elevation = spec_io.load_data(loc_file, return_loc_from_l1b_rad_nc=True)
+        elevation = elevation[:,:,:2]
         mean_elevation = np.mean(elevation[elevation != -9999]) / 1000.
         mean_elevation = min(max(0, mean_elevation),3)
 
@@ -129,7 +139,7 @@ def main(input_args=None):
             mean_h2o = np.mean(h2o[h2o != -9999])
         else:
             # Just guess something...
-            exit()
+            #exit()
             mean_h2o = 1.3
 
     gas = 'ch4'
@@ -143,7 +153,7 @@ def main(input_args=None):
                          '-g', str(mean_elevation),
                          '-w', str(mean_h2o),
                          '--output', files.target_file,
-                         '--hdr', radiance_file_hdr,
+                         '--hdr', radiance_file,
                          '--lut_dataset', args.lut_file]
         if args.co2:
             target_params.append('--co2')

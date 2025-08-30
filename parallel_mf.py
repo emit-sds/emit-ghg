@@ -96,7 +96,7 @@ def main(input_args=None):
    
     logging.info('Started processing input file: "%s"'%str(args.radiance_file))
     m_radiance, full_radiance = spec_io.load_data(args.radiance_file)
-    full_radiance = np.ascontiguousarray(full_radiance.transpose([0,2,1]))
+    full_radiance = np.ascontiguousarray(full_radiance[...].transpose([0,2,1]))
     wavelengths = m_radiance.wavelengths
     #ds = envi.open(envi_header(args.radiance_file),image=args.radiance_file)
     #if 'wavelength' not in ds.metadata:
@@ -216,7 +216,7 @@ def main(input_args=None):
         clouds_and_surface_water_mask = None
         if args.l2a_mask_file is not None:
             #clouds_and_surface_water_mask = np.sum(envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')[ce:chunk_edges[_ce+1],:,:3],axis=-1) > 0
-            _, clouds_and_surface_water_mask = spec_io.load_data(args.l2a_mask_file)
+            _, clouds_and_surface_water_mask = spec_io.load_data(args.l2a_mask_file, mask_type='mask')
             clouds_and_surface_water_mask = clouds_and_surface_water_mask[ce:chunk_edges[_ce+1],:,:3]
             clouds_and_surface_water_mask = np.sum(clouds_and_surface_water_mask, axis=-1) > 0
             good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
@@ -427,7 +427,7 @@ def calculate_saturation_mask(bandmask_file: str, radiance: np.array, dilation_i
     has been otherwise flagged with bad values (-9999). The bad9999 mask identifies these and
     excludes them.'''
 
-    _, l1b_bandmask_loaded = spec_io.load_data(bandmask_file)
+    _, l1b_bandmask_loaded = spec_io.load_data(bandmask_file, mask_type='band_mask')
     if chunk_edges is not None:
         l1b_bandmask_loaded = l1b_bandmask_loaded[chunk_edges[0]:chunk_edges[1],:,:]
 
