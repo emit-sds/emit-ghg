@@ -185,7 +185,7 @@ def main(input_args=None):
 
     # ORT MF
     if (os.path.isfile(files.mf_ort_file) is False or args.overwrite):
-        do_ortho_with_spec_io(args.obs_file, files.mf_file, files.mf_ort_file)
+        do_ortho_with_spec_io(args.glt_file, files.mf_file, files.mf_ort_file)
         convert_to_cog(files.mf_ort_file,
                        files.mf_ort_cog,
                        metadata[gas]['mf'],
@@ -193,7 +193,7 @@ def main(input_args=None):
                        args.product_version)
     # ORT Sensitivity
     if os.path.isfile(files.sens_ort_file) is False or args.overwrite:
-        do_ortho_with_spec_io(args.obs_file, files.mf_sens_file, files.sens_ort_file)
+        do_ortho_with_spec_io(args.glt_file, files.mf_sens_file, files.sens_ort_file)
     if os.path.isfile(files.sens_ort_cog) is False or args.overwrite:
         convert_to_cog(files.sens_ort_file,
                        files.sens_ort_cog,
@@ -202,7 +202,7 @@ def main(input_args=None):
                        args.product_version)
     # ORT Uncertainty
     if os.path.isfile(files.uncert_ort_file) is False or args.overwrite:
-        do_ortho_with_spec_io(args.obs_file, files.mf_uncert_file, files.uncert_ort_file)
+        do_ortho_with_spec_io(args.glt_file, files.mf_uncert_file, files.uncert_ort_file)
     if os.path.isfile(files.uncert_ort_cog) is False or args.overwrite:
         convert_to_cog(files.uncert_ort_file,
                        files.uncert_ort_cog,
