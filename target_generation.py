@@ -22,7 +22,6 @@ from os.path import exists
 import numpy as np
 import scipy.ndimage
 import argparse
-import spectral
 import h5py
 
 import spec_io
@@ -253,12 +252,9 @@ def main(input_args=None):
              'water': args.water_vapor,
              'order': args.order}
     if args.hdr and exists(args.hdr):
-        #image = spectral.io.envi.open(args.hdr)
         m, _ = spec_io.load_data(args.hdr)
         centers = m.wavelengths
         fwhm = m.fwhm
-        #centers = np.array([float(x) for x in image.metadata['wavelength']])
-        #fwhm = np.array([float(x) for x in image.metadata['fwhm']])
     elif args.txt and exists(args.txt):
         data = np.loadtxt(args.txt, usecols=(0, 1),delimiter=',')
         centers = data[:, 0]
