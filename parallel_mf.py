@@ -31,6 +31,8 @@ import numpy as np
 from utils import envi_header, write_bil_chunk
 import json
 from utils import SerialEncoder
+from time import time
+import pdb
 
 import logging
 import os
@@ -163,7 +165,9 @@ def main(input_args=None):
     for _ce, ce in enumerate(chunk_edges[:-1]):
         
         logging.info(f"load radiance for chunk {_ce +1} / {len(chunk_edges) - 1}")
-        radiance = ds.open_memmap(interleave='bil',writeable=False)[ce:chunk_edges[_ce+1],...].copy()
+        radiance = np.ascontiguousarray(ds.open_memmap(interleave='bil',writeable=False)[ce:chunk_edges[_ce+1],...].copy())
+        rad_for_mf = np.float64(radiance[:,active_wl_idx,:])
+        rad_for_mf = np.ascontiguousarray(rad_for_mf.transpose([2,0,1]))
         chunk_shape = (chunk_edges[_ce+1] - ce, output_shape[1], output_shape[2])
 
         logging.info("load masks")
@@ -187,14 +191,22 @@ def main(input_args=None):
         if args.l2a_mask_file is not None:
             clouds_and_surface_water_mask = np.sum(envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')[ce:chunk_edges[_ce+1],:,:3],axis=-1) > 0
             good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
+        
+        good_pixel_mask_for_mf = np.ascontiguousarray(good_pixel_mask.T)
 
         logging.info("applying matched filter")
-        output_dat, output_uncert_dat, output_sens_dat = mf_full_scene(radiance, 
+        start_time = time()
+        output_dat, output_uncert_dat, output_sens_dat = mf_full_scene(rad_for_mf, 
                                                                        absorption_coefficients,
                                                                        active_wl_idx,
-                                                                       good_pixel_mask,
+                                                                       good_pixel_mask_for_mf,
                                                                        noise_model_parameters,
                                                                        args)
+
+        print(time() - start_time)
+        output_dat = output_dat.T
+        output_uncert_dat = output_uncert_dat.T
+        output_sens_dat = output_sens_dat.T
 
         def apply_badvalue(d, mask, bad_data_value):
             d[mask] = bad_data_value 
@@ -420,20 +432,26 @@ def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, rad
     nedl = np.abs(noise_model_parameters[:, 0] * np.sqrt(noise_plus_meas) + noise_model_parameters[:, 2])
     return nedl
 
-def mf_full_scene(rdn_full, absorption_coefficients, active_wl_idx, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
-    nalong, nspec, ncross = rdn_full.shape
+def mf_full_scene(rdn_subset, absorption_coefficients, active_wl_idx, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
+    #nalong, nspec, ncross = rdn_full.shape
+    ncross, nalong, nspec = rdn_subset.shape
+    print(rdn_subset.shape)
 
-    mf = np.ones((nalong, ncross)) * args.nodata_value
-    uncert = np.ones((nalong, ncross)) * args.nodata_value
-    sens = np.ones((nalong, ncross)) * args.nodata_value
+    #mf = np.ones((nalong, ncross)) * args.nodata_value
+    #uncert = np.ones((nalong, ncross)) * args.nodata_value
+    #sens = np.ones((nalong, ncross)) * args.nodata_value
+    mf = np.ones((ncross, nalong)) * args.nodata_value
+    uncert = np.ones((ncross, nalong)) * args.nodata_value
+    sens = np.ones((ncross, nalong)) * args.nodata_value
 
-    rdn_subset = np.float64(rdn_full[:,active_wl_idx,:])
-    no_radiance_mask_full = np.all(np.logical_and(np.isfinite(rdn_subset), rdn_subset > -0.05), axis=1)
+    #rdn_subset = np.float64(rdn_full[:,active_wl_idx,:])
+    no_radiance_mask_full = np.all(np.logical_and(np.isfinite(rdn_subset), rdn_subset > -0.05), axis=2)
 
     for col in range(ncross):
-        rdn_col = np.ascontiguousarray(rdn_subset[:,:,col])
-        no_radiance_mask = no_radiance_mask_full[:,col]
-        good_pixel_idx = np.where(np.logical_and(good_pixel_mask[:,col], no_radiance_mask))[0]
+        #rdn_col = np.ascontiguousarray(rdn_subset[:,:,col])
+        rdn_col = rdn_subset[col,:,:]
+        no_radiance_mask = no_radiance_mask_full[col,:]
+        good_pixel_idx = np.where(np.logical_and(good_pixel_mask[col,:], no_radiance_mask))[0]
         if len(good_pixel_idx) < 10:
             logging.debug('Too few good pixels found in col {col}: skipping')
             continue
@@ -455,7 +473,8 @@ def mf_full_scene(rdn_full, absorption_coefficients, active_wl_idx, good_pixel_m
 
         # Matched filter
         mf_col = target.T.dot(Cinv).dot((rdn_col[no_radiance_mask,:] - mu).T) / normalizer
-        mf[no_radiance_mask,col] = mf_col * args.ppm_scaling
+        #mf[no_radiance_mask,col] = mf_col * args.ppm_scaling
+        mf[col, no_radiance_mask] = mf_col * args.ppm_scaling
 
         if args.uncert_output_file is not None:
             ####################################################################################################################
@@ -471,8 +490,8 @@ def mf_full_scene(rdn_full, absorption_coefficients, active_wl_idx, good_pixel_m
 
             sens_col = np.sqrt(denom) / normalizer
 
-            sens[no_radiance_mask,col] = sens_col
-            uncert[no_radiance_mask,col] = uncert_col * args.ppm_scaling
+            sens[col,no_radiance_mask] = sens_col
+            uncert[col,no_radiance_mask] = uncert_col * args.ppm_scaling
     
     mf[np.logical_and(no_radiance_mask_full, mf == args.nodata_value)] = args.nodata_value + nd_buffer
     mf[np.logical_not(no_radiance_mask_full)] = args.nodata_value
