@@ -433,22 +433,16 @@ def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, rad
     return nedl
 
 def mf_full_scene(rdn_subset, absorption_coefficients, active_wl_idx, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
-    #nalong, nspec, ncross = rdn_full.shape
     ncross, nalong, nspec = rdn_subset.shape
     print(rdn_subset.shape)
 
-    #mf = np.ones((nalong, ncross)) * args.nodata_value
-    #uncert = np.ones((nalong, ncross)) * args.nodata_value
-    #sens = np.ones((nalong, ncross)) * args.nodata_value
     mf = np.ones((ncross, nalong)) * args.nodata_value
     uncert = np.ones((ncross, nalong)) * args.nodata_value
     sens = np.ones((ncross, nalong)) * args.nodata_value
 
-    #rdn_subset = np.float64(rdn_full[:,active_wl_idx,:])
     no_radiance_mask_full = np.all(np.logical_and(np.isfinite(rdn_subset), rdn_subset > -0.05), axis=2)
 
     for col in range(ncross):
-        #rdn_col = np.ascontiguousarray(rdn_subset[:,:,col])
         rdn_col = rdn_subset[col,:,:]
         no_radiance_mask = no_radiance_mask_full[col,:]
         good_pixel_idx = np.where(np.logical_and(good_pixel_mask[col,:], no_radiance_mask))[0]
@@ -473,7 +467,6 @@ def mf_full_scene(rdn_subset, absorption_coefficients, active_wl_idx, good_pixel
 
         # Matched filter
         mf_col = target.T.dot(Cinv).dot((rdn_col[no_radiance_mask,:] - mu).T) / normalizer
-        #mf[no_radiance_mask,col] = mf_col * args.ppm_scaling
         mf[col, no_radiance_mask] = mf_col * args.ppm_scaling
 
         if args.uncert_output_file is not None:
