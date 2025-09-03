@@ -227,8 +227,6 @@ def main(input_args=None):
         del radiance
 
         logging.info('Run jobs')
-        print(active_wl_idx)
-        pdb.set_trace()
         jobs = [mf_one_column.remote(col, rdn_id, absorption_coefficients_id, active_wl_idx, good_pixel_mask, noise_model_parameters_id, args) for col in range(output_shape[2])]
         rreturn = [ray.get(jid) for jid in jobs]
 
