@@ -133,10 +133,19 @@ def main(input_args=None):
         mean_elevation = min(max(0, mean_elevation),3)
 
         if args.state_subs is not None:
-            state_ds = envi.open(envi_header(args.state_subs))
-            band_names = state_ds.metadata['band names']
-            h2o = state_ds.open_memmap(interleave='bip')[...,band_names.index('H2OSTR')]
-            mean_h2o = np.mean(h2o[h2o != -9999])
+            #state_ds = envi.open(envi_header(args.state_subs))
+            #band_names = state_ds.metadata['band names']
+            #h2o = state_ds.open_memmap(interleave='bip')[...,band_names.index('H2OSTR')]
+            #mean_h2o = np.mean(h2o[h2o != -9999])
+
+            m_state, d_state = spec_io.load_data(args.state_subs, mask_type='mask')
+            if args.state_subs.endswith('.nc'):
+                ind = m_state.band_names.index('H2O (g cm-2)')
+                mean_h2o = np.mean(d_state[:,:,ind])
+            else:
+                ind = m_state.band_names.index('H2OSTR')
+                mean_h2o = np.mean(d_state[:,0,ind])
+
         else:
             # Just guess something...
             #exit()
