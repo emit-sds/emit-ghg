@@ -428,17 +428,31 @@ def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, rad
     nedl = np.abs(noise_model_parameters[:, 0] * np.sqrt(noise_plus_meas) + noise_model_parameters[:, 2])
     return nedl
 
-def mf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
-    ncross, nalong, nspec = rdn_subset.shape
+def mf_full_scene(rdn, absorption_coefficients, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
+    '''Compute the matched filter for the entire scene along with sensitivity and uncertainty
+    
+    Args:
+        rdn (nd.array): radiance [ncross, nalong, nbands]
+        absorption_coefficient (nd.array): the absorption coefficient vector
+        good_pixel_mask (nd.array): pixels to use in MF [ncross, nalong]
+        noise_model_parameters (nd.array): instrument noise coefficients
+        args: the argparse arguments when this script was called
+    
+    Returns:
+        mf (nd.array): matched filter values [ncross, nalong]
+        uncert (nd.array): uncertainty values [ncross, nalong]
+        sens (nd.array): sensitivity values [ncross, nalong]
+    '''
+    ncross, nalong, nspec = rdn.shape
 
     mf = np.ones((ncross, nalong)) * args.nodata_value
     uncert = np.ones((ncross, nalong)) * args.nodata_value
     sens = np.ones((ncross, nalong)) * args.nodata_value
 
-    no_radiance_mask_full = np.all(np.logical_and(np.isfinite(rdn_subset), rdn_subset > -0.05), axis=2)
+    no_radiance_mask_full = np.all(np.logical_and(np.isfinite(rdn), rdn> -0.05), axis=2)
 
     for col in range(ncross):
-        rdn_col = rdn_subset[col,:,:]
+        rdn_col = rdn[col,:,:]
         no_radiance_mask = no_radiance_mask_full[col,:]
         good_pixel_idx = np.where(np.logical_and(good_pixel_mask[col,:], no_radiance_mask))[0]
         if len(good_pixel_idx) < 10:
@@ -465,17 +479,14 @@ def mf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask, noise_mo
         mf[col, no_radiance_mask] = mf_col * args.ppm_scaling
 
         if args.uncert_output_file is not None:
-            ####################################################################################################################
-            # Uncertainty
-            # This implements (s^T Cinv Sigma Cinv s) / (s^T Cinv aX) (in linear algebra notation)
+            # Sensitivity and Uncertainty
+            # This implements (s^T Cinv Sigma Cinv s) / (s^T Cinv aX) (in linear algebra notation) for the uncertainty
             # Sigma is diagonal, so we just need a standard numpy multiply, which we can also broadcast along the whole column
             sC = target.dot(Cinv)
             numer = (sC * nedl_variance[no_radiance_mask,:]) @ sC
-            a_times_X = -1 * absorption_coefficients.copy() * rdn_col[no_radiance_mask, :]
+            a_times_X = -1 * absorption_coefficients * rdn_col[no_radiance_mask, :]
             denom = ((target).dot(Cinv).dot(a_times_X.T))**2
             uncert_col = np.sqrt(numer/denom)
-            ####################################################################################################################
-
             sens_col = np.sqrt(denom) / normalizer
 
             sens[col,no_radiance_mask] = sens_col
