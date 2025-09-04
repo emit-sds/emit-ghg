@@ -198,7 +198,6 @@ def main(input_args=None):
         start_time = time()
         output_dat, output_uncert_dat, output_sens_dat = mf_full_scene(rad_for_mf, 
                                                                        absorption_coefficients,
-                                                                       active_wl_idx,
                                                                        good_pixel_mask_for_mf,
                                                                        noise_model_parameters,
                                                                        args)
