@@ -31,8 +31,6 @@ import numpy as np
 from utils import envi_header, write_bil_chunk
 import json
 from utils import SerialEncoder
-from time import time
-import pdb
 
 import logging
 import os
@@ -195,14 +193,12 @@ def main(input_args=None):
         good_pixel_mask_for_mf = np.ascontiguousarray(good_pixel_mask.T)
 
         logging.info("applying matched filter")
-        start_time = time()
         output_dat, output_uncert_dat, output_sens_dat = mf_full_scene(rad_for_mf, 
                                                                        absorption_coefficients,
                                                                        good_pixel_mask_for_mf,
                                                                        noise_model_parameters,
                                                                        args)
 
-        print(time() - start_time)
         output_dat = output_dat.T
         output_uncert_dat = output_uncert_dat.T
         output_sens_dat = output_sens_dat.T
