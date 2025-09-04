@@ -31,7 +31,6 @@ import numpy as np
 from utils import envi_header, write_bil_chunk
 import json
 from utils import SerialEncoder
-import pdb
 
 import spec_io
 
@@ -87,8 +86,8 @@ def main(input_args=None):
                         filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
    
     logging.info('Started processing input file: "%s"'%str(args.radiance_file))
-    m_radiance, full_radiance = spec_io.load_data(args.radiance_file)
-    full_radiance = np.ascontiguousarray(full_radiance[...].transpose([0,2,1])) # ncrosstrack x nbands x nalongtrack
+    m_radiance, radiance = spec_io.load_data(args.radiance_file) # nalong x ncross x nbands
+    radiance = np.array(radiance).transpose([0,2,1]) # nalong x nbands x ncross
     wavelengths = m_radiance.wavelengths
 
     if args.wavelength_range is None:
@@ -130,8 +129,8 @@ def main(input_args=None):
 
     logging.info('Create output file, initialized with nodata')
     outmeta = {}
-    outmeta['samples'] = full_radiance.shape[2]
-    outmeta['lines'] = full_radiance.shape[0]
+    outmeta['samples'] = radiance.shape[2] # ncross
+    outmeta['lines'] = radiance.shape[0] # nalong
     outmeta['data type'] = np2envitype(np.float32)
     outmeta['bands'] = 1
     outmeta['description'] = 'Matched Filter Results'
@@ -155,7 +154,6 @@ def main(input_args=None):
         output_ds = envi.create_image(envi_header(args.sens_output_file),outmeta,force=True,ext='')
         del output_ds
         write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.sens_output_file, 0, output_shape)
-
  
     if args.chunksize is None:
         chunk_edges = [0, output_shape[0]]
@@ -166,8 +164,8 @@ def main(input_args=None):
     for _ce, ce in enumerate(chunk_edges[:-1]):
         
         logging.info(f"load radiance for chunk {_ce +1} / {len(chunk_edges) - 1}")
-        radiance = full_radiance[ce:chunk_edges[_ce+1],...].copy()
-        rad_for_mf = np.float64(np.ascontiguousarray(radiance[:,active_wl_idx,:].transpose([2,0,1]))) #ncross_track x nalong_track x nbands
+        radiance = radiance[ce:chunk_edges[_ce+1],...]
+        rad_for_mf = np.float64(np.ascontiguousarray(radiance[:,active_wl_idx,:].transpose([2,0,1]))) #ncross x nalong x nbands
         chunk_shape = (chunk_edges[_ce+1] - ce, output_shape[1], output_shape[2])
 
         logging.info("load masks")
@@ -194,10 +192,12 @@ def main(input_args=None):
             clouds_and_surface_water_mask = np.sum(clouds_and_surface_water_mask, axis=-1) > 0
             good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
         
+        good_pixel_mask = np.ascontiguousarray(good_pixel_mask.T)
+
         logging.info("applying matched filter")
         output_dat, output_uncert_dat, output_sens_dat = mf_full_scene(rad_for_mf, 
                                                                        absorption_coefficients,
-                                                                       good_pixel_mask.T,
+                                                                       good_pixel_mask,
                                                                        noise_model_parameters,
                                                                        args)
 
@@ -430,7 +430,6 @@ def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, rad
 
 def mf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
     ncross, nalong, nspec = rdn_subset.shape
-    print(rdn_subset.shape)
 
     mf = np.ones((ncross, nalong)) * args.nodata_value
     uncert = np.ones((ncross, nalong)) * args.nodata_value
