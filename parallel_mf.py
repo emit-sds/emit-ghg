@@ -432,7 +432,7 @@ def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, rad
     nedl = np.abs(noise_model_parameters[:, 0] * np.sqrt(noise_plus_meas) + noise_model_parameters[:, 2])
     return nedl
 
-def mf_full_scene(rdn_subset, absorption_coefficients, active_wl_idx, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
+def mf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
     ncross, nalong, nspec = rdn_subset.shape
     print(rdn_subset.shape)
 
