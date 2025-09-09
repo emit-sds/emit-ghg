@@ -25,7 +25,7 @@ import parallel_mf
 import scale
 import numpy as np
 from utils import convert_to_cog
-from files import Filenames, AV3_DAAC_Filenames
+from files import Filenames, AV3_DAAC_Filenames, EMIT_DAAC_Filenames
 import spec_io
 
 metadata = {
@@ -99,9 +99,12 @@ def main(input_args=None):
     if args.co2:
         gas = 'co2'
 
-    files = Filenames(args.output_base)
     if 'AV3' in args.radiance_file and args.radiance_file.endswith('.nc'):
-        files = AV3_DAAC_Filenames(args.outputbase, gas)
+        files = AV3_DAAC_Filenames(args.output_base, args.radiance_file, gas)
+    elif 'EMIT' in args.radiance_file and args.radiance_file.endswith('.nc'):
+        files = EMIT_DAAC_Filenames(args.output_base, args.radiance_file, gas)
+    else:
+        files = Filenames(args.output_base)
 
     # if os.path.isfile(files.mf_file):
     #     dat = gdal.Open(files.mf_file).ReadAsArray()
@@ -165,8 +168,7 @@ def main(input_args=None):
                    '--flare_outfile', files.flare_file,
                    '--noise_parameters_file', args.noise_file,
                    '--sens_output_file', files.mf_sens_file,
-                   '--uncert_output_file', files.mf_uncert_file,
-                   '--mf_second_round_threshold_ppmm', '2000.0']
+                   '--uncert_output_file', files.mf_uncert_file]
 
         if args.l2a_mask_file.lower() != 'none':
             subargs.extend(['--l2a_mask_file', args.l2a_mask_file])
@@ -187,7 +189,10 @@ def main(input_args=None):
         d_ort = spec_io.ortho_data(d, m_obs.glt)
         m.geotransform = m_obs.geotransform
         m.projection = m_obs.projection
-        spec_io.write_envi_file(d_ort, m, ortho_output_filename)
+        if ortho_output_filename.endswith('.tif'):
+            spec_io.write_geotiff(d_ort, m, ortho_output_filename)
+        else:
+            spec_io.write_envi_file(d_ort, m, ortho_output_filename)
 
     # ORT MF
     if (os.path.isfile(files.mf_ort_file) is False or args.overwrite):
