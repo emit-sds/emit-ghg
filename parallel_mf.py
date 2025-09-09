@@ -37,13 +37,6 @@ import spec_io
 import logging
 import os
 
-# Borrowed from isofit/isofit/wrappers/ray.py
-if os.environ.get("GHG_DEBUG"):
-    logging.info("Using internal ray")
-    import rray as ray
-else:
-    import ray
-
 
 def main(input_args=None):
     parser = argparse.ArgumentParser(description="Robust MF")
@@ -56,7 +49,6 @@ def main(input_args=None):
     parser.add_argument('--num_cores', type=int, default=-1, help='number of cores (-1 (default))')
     parser.add_argument('--n_mc', type=int, default=10, help='number of monte carlo runs')
     parser.add_argument('--mc_bag_fraction',type=float, default=0.7, help='fraction of data to use in each MC instance')
-    parser.add_argument('--ray_temp_dir', type=str, default=None, help='ray temp directory (None (default))')    
     parser.add_argument('--wavelength_range', nargs='+', type=float, default=None, help='wavelengths to use: None = default for gas, 2x values = min/max pairs of regions')         
     parser.add_argument('--remove_dominant_pcs',action='store_true', help='remove dominant PCs from covariance calculation')         
     parser.add_argument('--subsample_strategy',type=str,choices=['random','spatial_blocks'], help='sampling strategy for mc runs')         
@@ -170,20 +162,8 @@ def main(input_args=None):
         chunk_edges = np.arange(0, output_shape[0], args.chunksize).tolist()
         chunk_edges.append(output_shape[0])
 
-    rayargs = {'_temp_dir': args.ray_temp_dir, 'ignore_reinit_error': True, 'include_dashboard': False}
-    rayargs['num_cpus'] = args.num_cores
-    if args.num_cores == -1:
-        import multiprocessing
-        rayargs['num_cpus'] = multiprocessing.cpu_count() - 1
-    ray.init(**rayargs)
-    rdn_id = None
-    absorption_coefficients_id = ray.put(absorption_coefficients)
-    noise_model_parameters_id = ray.put(noise_model_parameters)
-    del absorption_coefficients, noise_model_parameters
     for _ce, ce in enumerate(chunk_edges[:-1]):
         
-        if rdn_id is not None:
-            del rdn_id; rdn_id = None
         logging.info(f"load radiance for chunk {_ce +1} / {len(chunk_edges) - 1}")
         radiance = full_radiance[ce:chunk_edges[_ce+1],...].copy()
         chunk_shape = (chunk_edges[_ce+1] - ce, output_shape[1], output_shape[2])
@@ -211,34 +191,23 @@ def main(input_args=None):
             clouds_and_surface_water_mask = clouds_and_surface_water_mask[ce:chunk_edges[_ce+1],:,:3]
             clouds_and_surface_water_mask = np.sum(clouds_and_surface_water_mask, axis=-1) > 0
             good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
+        
+        good_pixel_mask_for_mf = np.ascontiguousarray(good_pixel_mask.T)
 
-        logging.info('initializing ray, adding data to shared memory')
+        logging.info("applying matched filter")
+        output_dat, output_uncert_dat, output_sens_dat = mf_full_scene(rad_for_mf, 
+                                                                       absorption_coefficients,
+                                                                       good_pixel_mask_for_mf,
+                                                                       noise_model_parameters,
+                                                                       args)
 
-        rdn_id = ray.put(radiance)
-        del radiance
-
-        logging.info('Run jobs')
-        jobs = [mf_one_column.remote(col, rdn_id, absorption_coefficients_id, active_wl_idx, good_pixel_mask, noise_model_parameters_id, args) for col in range(output_shape[2])]
-        rreturn = [ray.get(jid) for jid in jobs]
-
-        logging.info('Collecting and writing output')
-        output_dat = np.zeros(chunk_shape,dtype=np.float32)
-        output_uncert_dat = np.ones(chunk_shape,dtype=np.float32) * args.nodata_value
-        output_sens_dat = np.ones(chunk_shape,dtype=np.float32) * args.nodata_value
-        for ret in rreturn:
-            if ret[0] is not None:
-                output_dat[:, 0, ret[1]] = ret[0][:,0]
-                if ret[2] is not None:
-                    output_uncert_dat[:, 0, ret[1]] = ret[2][:]
-                if ret[3] is not None:
-                    output_sens_dat[:, 0, ret[1]] = ret[3][:]
+        output_dat = output_dat.T
+        output_uncert_dat = output_uncert_dat.T
+        output_sens_dat = output_sens_dat.T
 
         def apply_badvalue(d, mask, bad_data_value):
-            d = d.transpose((0,2,1))
-            d[mask,:] = bad_data_value 
-            d = d.transpose((0,2,1))
+            d[mask] = bad_data_value 
             return d
-
 
         if args.mask_clouds_water and clouds_and_surface_water_mask is not None:
             logging.info('Masking clouds and water')
@@ -260,6 +229,10 @@ def main(input_args=None):
             output_dat = apply_badvalue(output_dat, dilated_flare_mask, args.screen_value) 
             output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_flare_mask, args.screen_value) 
             output_sens_dat = apply_badvalue(output_sens_dat, dilated_flare_mask, args.screen_value) 
+
+        output_dat = output_dat[:,None,:]
+        output_uncert_dat = output_uncert_dat[:,None,:]
+        output_sens_dat = output_sens_dat[:,None,:]
 
         write_bil_chunk(output_dat, args.output_file, ce, chunk_shape)
         if args.uncert_output_file is not None:
@@ -455,76 +428,42 @@ def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, rad
     nedl = np.abs(noise_model_parameters[:, 0] * np.sqrt(noise_plus_meas) + noise_model_parameters[:, 2])
     return nedl
 
+def mf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
+    ncross, nalong, nspec = rdn_subset.shape
+    print(rdn_subset.shape)
 
-@ray.remote
-def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.array, active_wl_idx: np.array, good_pixel_mask: np.array, noise_model_parameters: np.array, args, nd_buffer=0.1):
-    """ Run the matched filter on a single column of the input image
+    mf = np.ones((ncross, nalong)) * args.nodata_value
+    uncert = np.ones((ncross, nalong)) * args.nodata_value
+    sens = np.ones((ncross, nalong)) * args.nodata_value
 
-    Args:
-        col (int): column to run on
-        rdn_full (np.array): full radiance dataset, bil interleave
-        outimg_mm_shape (tuple): output image shape
-        absorption_coefficients (np.array): absorption coefficients for target
-        active_wl_idx (np.array): active wavelength indices
-        good_pixel_mask (np.array): mask of valid pixels to use for covariance / mean estimates
-        args (_type_): arguments from input
-        nd_buffer (float, optional): buffer value to add to values that accidentily land on nodata values. Defaults to 0.1.
+    no_radiance_mask_full = np.all(np.logical_and(np.isfinite(rdn_subset), rdn_subset > -0.05), axis=2)
 
-    Returns:
-        (np.array): matched filter results from the column
-    """
+    for col in range(ncross):
+        rdn_col = rdn_subset[col,:,:]
+        no_radiance_mask = no_radiance_mask_full[col,:]
+        good_pixel_idx = np.where(np.logical_and(good_pixel_mask[col,:], no_radiance_mask))[0]
+        if len(good_pixel_idx) < 10:
+            logging.debug('Too few good pixels found in col {col}: skipping')
+            continue
 
-    logging.basicConfig(format='%(levelname)s:%(asctime)s ||| %(message)s', level=args.loglevel,
-                        filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
-    logging.debug(f'Col: {col}')
-
-    rdn = np.float64(rdn_full[:, active_wl_idx, col].copy())
-    no_radiance_mask = np.all(np.logical_and(np.isfinite(rdn), rdn > -0.05), axis=1)
-    good_pixel_idx = np.where(np.logical_and(good_pixel_mask[:,col], no_radiance_mask))[0]
-    if len(good_pixel_idx) < 10:
-        logging.debug('Too few good pixels found in col {col}: skipping')
-        return None, None
-
-    if args.uncert_output_file is not None:
-        nedl_variance = (get_noise_equivalent_spectral_radiance(noise_model_parameters, rdn))**2
+        if args.uncert_output_file is not None:
+            nedl_variance = (get_noise_equivalent_spectral_radiance(noise_model_parameters, rdn_col))**2
     
-    # array to hold results in
-    mf_mc = np.ones((rdn.shape[0],args.n_mc)) * args.nodata_value
-    uncert_mc = np.ones((rdn.shape[0],args.n_mc)) * args.nodata_value
-    sens_mc = np.ones((rdn.shape[0],args.n_mc)) * args.nodata_value
-
-    np.random.seed(13)
-    for _mc in range(args.n_mc):
-        
-        # get subset of pixels to use for covariance / mean estimates
-        cov_subset = get_mc_subset(_mc, args, good_pixel_idx)
-
-        # optional radiance adjustment for max radiance pcs...experimental
-        if args.remove_dominant_pcs:
-            pca_mean = rdn[cov_subset,:].mean(axis=0) 
-            pcavals, pcavec = scipy.linalg.eigh(cov(rdn - pca_mean))
-            loc_rdn = (rdn - pca_mean ) @ pcavec[:,:-5]
-            target = (absorption_coefficients.copy() * pca_mean) @ pcavec[:,:-5]
-        else:
-            loc_rdn = rdn
-            target = absorption_coefficients.copy() * np.mean(loc_rdn[cov_subset,:],axis=0)
-
-        # calculate covariance and mean
         try:
-            C = calculate_mf_covariance(loc_rdn[cov_subset,:], args.covariance_style, args.fixed_alpha)
+            C = calculate_mf_covariance(rdn_col[good_pixel_idx,:], args.covariance_style, args.fixed_alpha)
             Cinv = scipy.linalg.inv(C, check_finite=False)
         except np.linalg.LinAlgError:
             logging.warn('singular matrix. skipping this column')
-            return None, None
-        mu = np.mean(loc_rdn[cov_subset,:], axis=0)
+            continue
+        mu = np.mean(rdn_col[good_pixel_idx,:], axis=0)
 
-        # Matched filter time
+        target = absorption_coefficients * mu
+
         normalizer = target.dot(Cinv).dot(target.T)
-        if args.ace_filter:
-            rx = np.sum((loc_rdn[no_radiance_mask,:] - mu) @ Cinv * (loc_rdn[no_radiance_mask,:] - mu), axis = 1)
-            normalizer = normalizer * rx
 
-        mf = ((loc_rdn[no_radiance_mask,:] - mu).dot(Cinv).dot(target.T)) / normalizer
+        # Matched filter
+        mf_col = target.T.dot(Cinv).dot((rdn_col[no_radiance_mask,:] - mu).T) / normalizer
+        mf[col, no_radiance_mask] = mf_col * args.ppm_scaling
 
         if args.uncert_output_file is not None:
             ####################################################################################################################
@@ -533,46 +472,34 @@ def mf_one_column(col: int, rdn_full: np.array, absorption_coefficients: np.arra
             # Sigma is diagonal, so we just need a standard numpy multiply, which we can also broadcast along the whole column
             sC = target.dot(Cinv)
             numer = (sC * nedl_variance[no_radiance_mask,:]) @ sC
-            a_times_X = -1 * absorption_coefficients.copy() * loc_rdn[no_radiance_mask, :]
-            denom = ((a_times_X).dot(Cinv).dot(target.T))**2
-            uncert = np.sqrt(numer/denom)
+            a_times_X = -1 * absorption_coefficients.copy() * rdn_col[no_radiance_mask, :]
+            denom = ((target).dot(Cinv).dot(a_times_X.T))**2
+            uncert_col = np.sqrt(numer/denom)
             ####################################################################################################################
 
-            sens_mc[no_radiance_mask,_mc] = np.sqrt(denom) / normalizer
-        
-        
-        # scale outputs
-        mf_mc[no_radiance_mask,_mc] = mf * args.ppm_scaling
-        if args.uncert_output_file is not None:
-            uncert_mc[no_radiance_mask,_mc] = uncert * args.ppm_scaling
-    
+            sens_col = np.sqrt(denom) / normalizer
 
-    output = np.vstack([np.mean(mf_mc,axis=-1), np.std(mf_mc,axis=-1)]).T
-    output[np.logical_and(no_radiance_mask, output[...,0] == args.nodata_value),:] = args.nodata_value + nd_buffer
-    output[np.logical_not(no_radiance_mask),:] = args.nodata_value
+            sens[col,no_radiance_mask] = sens_col
+            uncert[col,no_radiance_mask] = uncert_col * args.ppm_scaling
+    
+    mf[np.logical_and(no_radiance_mask_full, mf == args.nodata_value)] = args.nodata_value + nd_buffer
+    mf[np.logical_not(no_radiance_mask_full)] = args.nodata_value
 
     if args.uncert_output_file is not None:
-        uncert = uncert_mc[:,0]
-        uncert[np.logical_and(no_radiance_mask, uncert == args.nodata_value)] = args.nodata_value + nd_buffer
-        uncert[np.logical_not(no_radiance_mask)] = args.nodata_value
+        uncert[np.logical_and(no_radiance_mask_full, uncert == args.nodata_value)] = args.nodata_value + nd_buffer
+        uncert[np.logical_not(no_radiance_mask_full)] = args.nodata_value
         uncert[np.logical_not(np.isfinite(uncert))] = args.nodata_value
-        sens = sens_mc[:,0]
-        sens[np.logical_and(no_radiance_mask, sens == args.nodata_value)] = args.nodata_value + nd_buffer
-        sens[np.logical_not(no_radiance_mask)] = args.nodata_value
+        sens[np.logical_and(no_radiance_mask_full, sens == args.nodata_value)] = args.nodata_value + nd_buffer
+        sens[np.logical_not(no_radiance_mask_full)] = args.nodata_value
         sens[np.logical_not(np.isfinite(uncert))] = args.nodata_value
     else:
-        #uncert = np.ones(rdn.shape[0]) * args.nodata_value
-        #sens = np.ones(rdn.shape[0]) * args.nodata_value
         uncert = None
         sens = None
-        
-    logging.debug(f'Column {col} mean: {np.mean(output[good_pixel_idx,0])}')
-    return output.astype(np.float32), col, uncert, sens
 
+    return mf.astype(np.float32), uncert, sens
 
 if __name__ == '__main__':
     main()
-    ray.shutdown()
 
 
 
