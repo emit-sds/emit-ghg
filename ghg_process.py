@@ -25,7 +25,7 @@ import parallel_mf
 import scale
 import numpy as np
 from utils import convert_to_cog
-from files import Filenames
+from files import Filenames, AV3_DAAC_Filenames
 import spec_io
 
 metadata = {
@@ -95,7 +95,13 @@ def main(input_args=None):
     logging.basicConfig(format='%(levelname)s:%(asctime)s ||| %(message)s', level=args.loglevel,
                         filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
 
+    gas = 'ch4'
+    if args.co2:
+        gas = 'co2'
+
     files = Filenames(args.output_base)
+    if 'AV3' in args.radiance_file and args.radiance_file.endswith('.nc'):
+        files = AV3_DAAC_Filenames(args.outputbase, gas)
 
     # if os.path.isfile(files.mf_file):
     #     dat = gdal.Open(files.mf_file).ReadAsArray()
@@ -127,12 +133,9 @@ def main(input_args=None):
 
         else:
             # Just guess something...
-            exit()
-            mean_h2o = 1.3
-
-    gas = 'ch4'
-    if args.co2:
-        gas = 'co2'
+            #exit()
+            # For AV3
+            mean_h2o = 2.5
 
     # Run target generation
     if (os.path.isfile(files.target_file) is False or args.overwrite):
@@ -157,13 +160,16 @@ def main(input_args=None):
                    files.mf_file,
                    '--n_mc', '1',
                    '--l1b_bandmask_file', args.l1b_bandmask_file,
-                   '--l2a_mask_file', args.l2a_mask_file,
                    '--fixed_alpha', '0.0000000001',
                    '--mask_clouds_water',
                    '--flare_outfile', files.flare_file,
                    '--noise_parameters_file', args.noise_file,
                    '--sens_output_file', files.mf_sens_file,
-                   '--uncert_output_file', files.mf_uncert_file]
+                   '--uncert_output_file', files.mf_uncert_file,
+                   '--mf_second_round_threshold_ppmm', '2000.0']
+
+        if args.l2a_mask_file.lower() != 'none':
+            subargs.extend(['--l2a_mask_file', args.l2a_mask_file])
 
         if args.wavelength_range is not None:
             subargs.extend(['--wavelength_range'] + [str(val) for val in args.wavelength_range])
