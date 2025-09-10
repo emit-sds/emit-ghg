@@ -116,13 +116,15 @@ def main(input_args=None):
     if os.path.isfile(files.target_file) is False or args.overwrite:
         _, obs = spec_io.load_data(args.obs_file)
         sza = obs[...,4]
-
         mean_sza = np.mean(sza[sza != -9999])
 
         _, elevation = spec_io.load_data(args.loc_file, return_loc_from_l1b_rad_nc=True)
-        elevation = elevation[:,:,:2]
+        elevation = elevation[:,:,2]
         mean_elevation = np.mean(elevation[elevation != -9999]) / 1000.
         mean_elevation = min(max(0, mean_elevation),3)
+
+        altitude = (np.float64(obs[:,:,0]) * np.cos(np.float64(obs[:,:,2]) * np.pi / 180.) + np.float64(elevation)) / 1000.
+        mean_altitude = np.mean(altitude[elevation != -9999])
 
         if args.state_subs is not None:
 
@@ -143,7 +145,7 @@ def main(input_args=None):
     # Run target generation
     if (os.path.isfile(files.target_file) is False or args.overwrite):
         target_params = ['-z', str(mean_sza),
-                         '-s', '100',
+                         '-s', str(mean_altitude),
                          '-g', str(mean_elevation),
                          '-w', str(mean_h2o),
                          '--output', files.target_file,
