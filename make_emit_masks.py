@@ -9,15 +9,15 @@ import os
 import argparse
 from osgeo import gdal
 import numpy as np
-from spectral.io import envi
-from isofit.core.sunposition import sunpos
-from isofit.core.common import resample_spectrum
+from sunposition import sunpos
 from datetime import datetime
 from scipy.ndimage.morphology import distance_transform_edt
-from emit_utils.file_checks import envi_header
 import ray
 import multiprocessing
+from common import resample_spectrum
+import pdb
 
+import spec_io
 
 def haversine_distance(lon1, lat1, lon2, lat2, radius=6335439):
     """ Approximate the great circle distance using Haversine formula
@@ -42,9 +42,17 @@ def haversine_distance(lon1, lat1, lon2, lat2, radius=6335439):
 
     return d
 
+def get_band_names_idx(band_names, key):
+    idx = -1
+    for i, band_name in enumerate(band_names):
+        if key in band_name.lower():
+            idx = i
+    if idx == -1:
+        raise IndexError(f'Could not find {key} in {[b.lower() for b in band_names]}')
+    return idx
 
 @ray.remote
-def build_line_masks(start_line: int, stop_line: int, rdnfile: str, locfile: str, atmfile: str, dt: datetime, h2o_band: np.array, aod_bands: np.array, pixel_size: float, outfile: str, wl: np.array, irr: np.array):
+def build_line_masks(start_line: int, stop_line: int, rdn_in: np.array, loc_in: np.array, atmfile: str, dt: datetime, h2o_band: np.array, aod_bands: np.array, pixel_size: float, outfile: str, wl: np.array, irr: np.array, m_loc):
     # determine glint bands having negligible water reflectance
     BLUE = np.logical_and(wl > 440, wl < 460)
     NIR = np.logical_and(wl > 950, wl < 1000)
@@ -59,24 +67,21 @@ def build_line_masks(start_line: int, stop_line: int, rdnfile: str, locfile: str
     b1380 = np.argmin(abs(wl-1380))
     b1650 = np.argmin(abs(wl-1650))
 
-    rdn_ds = envi.open(envi_header(rdnfile)).open_memmap(interleave='bil')
-    loc_ds = envi.open(envi_header(locfile)).open_memmap(interleave='bil')
-
-    if atmfile is not None:
-        atm_ds = envi.open(envi_header(atmfile)).open_memmap(interleave='bil')
-
-    return_mask = np.zeros((stop_line - start_line, 8, rdn_ds.shape[2]))
+    return_mask = np.zeros((stop_line - start_line, 8, rdn_in.shape[2]))
     for line in range(start_line, stop_line):
         print(f'{line} / {stop_line - start_line}')
-        loc = loc_ds[line,...].copy().astype(np.float32).T
-        rdn = rdn_ds[line,...].copy().astype(np.float32).T
+        loc = loc_in[line,...].copy().astype(np.float32).T
+        rdn = rdn_in[line,...].copy().astype(np.float32).T
 
         if atmfile is not None:
             atm = atm_ds[line,...].copy().astype(np.float32).T
 
+        lat_idx = get_band_names_idx(m_loc.band_names, 'latitude')
+        lon_idx = get_band_names_idx(m_loc.band_names, 'longitude')
+        print(lat_idx, lon_idx)
         elevation_m = loc[:, 2]
-        latitude = loc[:, 1]
-        longitudeE = loc[:, 0]
+        latitude = loc[:, lat_idx]
+        longitudeE = loc[:, lon_idx]
         az, zen, ra, dec, h = sunpos(dt, latitude, longitudeE,
                                      elevation_m, radians=True).T
 
@@ -147,16 +152,13 @@ def main():
     parser.add_argument('--aerosol_threshold', type=float, default=0.5)
     args = parser.parse_args()
 
-    rdn_hdr = envi.read_envi_header(envi_header(args.rdnfile))
-    rdn_shp = envi.open(envi_header(args.rdnfile)).open_memmap(interleave='bil').shape
+    m_rdn, rdn = spec_io.load_data(args.rdnfile)
+    rdn = rdn.transpose([0,2,1])
+    rdn_shp = rdn.shape
 
     aod_bands, h2o_band = [], []
 
     if args.atmfile is not None:
-
-        atm_hdr = envi.read_envi_header(envi_header(args.atmfile))
-        atm_shp = envi.open(envi_header(args.atmfile)).open_memmap(interleave='bil').shape
-
         if atm_shp[0] != rdn_shp[0] or atm_shp[2] != rdn_shp[2]:
             raise ValueError('Label and input file dimensions do not match.')
 
@@ -167,7 +169,9 @@ def main():
             elif 'AER' in name or 'AOT' in name or 'AOD' in name:
                 aod_bands.append(i)
 
-    loc_shp = envi.open(envi_header(args.locfile)).open_memmap(interleave='bil').shape
+    m_loc, loc = spec_io.load_data(args.locfile, return_loc_from_l1b_rad_nc=True)
+    loc = loc.transpose([0,2,1])
+    loc_shp = loc.shape
 
     # Check file size consistency
     if loc_shp[0] != rdn_shp[0] or loc_shp[2] != rdn_shp[2]:
@@ -179,26 +183,24 @@ def main():
     if args.wavelengths is not None:
         c, wl, fwhm = np.loadtxt(args.wavelengths).T
     else:
-        if not 'wavelength' in rdn_hdr:
+        if not hasattr(m_rdn, 'wavelengths'):
             raise IndexError('Could not find wavelength data anywhere')
         else:
-            wl = np.array([float(f) for f in rdn_hdr['wavelength']])
-        if not 'fwhm' in rdn_hdr:
+            wl = m_rdn.wavelengths
+        if not hasattr(m_rdn, 'fwhm'):
             raise IndexError('Could not find fwhm data anywhere')
         else:
-            fwhm = np.array([float(f) for f in rdn_hdr['fwhm']])
+            fwhm = m_rdn.fwhm
 
     # find pixel size
-    if 'map info' in rdn_hdr.keys():
-        pixel_size = float(rdn_hdr['map info'][5].strip())
+    if hasattr(m_rdn, 'map info'):
+        pixel_size = float(m_rdn['map info'][5].strip())
     else:
-        loc_memmap = envi.open(envi_header(args.locfile)).open_memmap(interleave='bip')
         center_y = int(loc_shp[0]/2)
         center_x = int(loc_shp[2]/2)
-        center_pixels = loc_memmap[center_y-1:center_y+1, center_x, :2]
+        center_pixels = loc[center_y-1:center_y+1, :2, center_x]
         pixel_size = haversine_distance(
             center_pixels[0, 1], center_pixels[0, 0], center_pixels[1, 1], center_pixels[1, 0])
-        del loc_memmap, center_pixels
 
     # find solar zenith
     fid = os.path.split(args.rdnfile)[1].split('_')[0]
@@ -219,17 +221,7 @@ def main():
     irr_resamp = resample_spectrum(irr, irr_wl, wl, fwhm)
     irr_resamp = np.array(irr_resamp, dtype=np.float32)
 
-    rdn_dataset = gdal.Open(args.rdnfile, gdal.GA_ReadOnly)
     maskbands = 8
-
-    # Build output dataset
-    driver = gdal.GetDriverByName('ENVI')
-    driver.Register()
-
-    outDataset = driver.Create(args.outfile, rdn_shp[2], rdn_shp[0], maskbands, gdal.GDT_Float32, options=['INTERLEAVE=BIL'])
-    outDataset.SetProjection(rdn_dataset.GetProjection())
-    outDataset.SetGeoTransform(rdn_dataset.GetGeoTransform())
-    del outDataset
 
     rayargs = {'local_mode': args.n_cores == 1}
     if args.n_cores <= 0:
@@ -240,7 +232,11 @@ def main():
     linebreaks = np.linspace(0, rdn_shp[0], num=args.n_cores*3).astype(int)
 
     irrid = ray.put(irr_resamp)
-    jobs = [build_line_masks.remote(linebreaks[_l], linebreaks[_l+1], args.rdnfile, args.locfile, args.atmfile, dt, h2o_band, aod_bands, pixel_size, args.outfile, wl, irrid) for _l in range(len(linebreaks)-1)]
+    rdn_id = ray.put(rdn)
+    loc_id = ray.put(loc)
+    m_loc_id = ray.put(m_loc)
+    #build_line_masks(linebreaks[0], linebreaks[1], rdn, loc, args.atmfile, dt, h2o_band, aod_bands, pixel_size, args.outfile, wl, irr, m_loc)
+    jobs = [build_line_masks.remote(linebreaks[_l], linebreaks[_l+1], rdn_id, loc_id, args.atmfile, dt, h2o_band, aod_bands, pixel_size, args.outfile, wl, irrid, m_loc_id) for _l in range(len(linebreaks)-1)]
     rreturn = [ray.get(jid) for jid in jobs]
     ray.shutdown()
 
@@ -261,17 +257,13 @@ def main():
     # Combine Cloud, Cirrus, Water, Spacecraft, and Buffer masks
     mask[:, 7, :] = np.logical_or(np.sum(mask[:,0:5,:], axis=1) > 0, mask[:,5,:] > args.aerosol_threshold)
 
-    hdr = rdn_hdr.copy()
-    hdr['bands'] = str(maskbands)
-    hdr['band names'] = ['Cloud flag', 'Cirrus flag', 'Water flag',
+    band_names = ['Cloud flag', 'Cirrus flag', 'Water flag',
                          'Spacecraft Flag', 'Dilated Cloud Flag',
                          'AOD550', 'H2O (g cm-2)', 'Aggregate Flag']
-
-    hdr['interleave'] = 'bil'
-    del hdr['wavelength']
-    del hdr['fwhm']
-    envi.write_envi_header(envi_header(args.outfile), hdr)
-    mask.astype(dtype=np.float32).tofile(args.outfile)
+    
+    mask = np.float32(np.ascontiguousarray(mask.transpose([0,2,1])))
+    m_mask = spec_io.GenericGeoMetadata(band_names, geotransform=m_rdn.geotransform, projection=m_rdn.projection, nodata_value=-9999)
+    spec_io.write_envi_file(mask, m_mask, args.outfile)
 
 
 if __name__ == "__main__":
