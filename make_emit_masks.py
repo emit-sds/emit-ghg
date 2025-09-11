@@ -15,7 +15,6 @@ from scipy.ndimage.morphology import distance_transform_edt
 import ray
 import multiprocessing
 from common import resample_spectrum
-import pdb
 
 import spec_io
 
@@ -78,7 +77,6 @@ def build_line_masks(start_line: int, stop_line: int, rdn_in: np.array, loc_in: 
 
         lat_idx = get_band_names_idx(m_loc.band_names, 'latitude')
         lon_idx = get_band_names_idx(m_loc.band_names, 'longitude')
-        print(lat_idx, lon_idx)
         elevation_m = loc[:, 2]
         latitude = loc[:, lat_idx]
         longitudeE = loc[:, lon_idx]
@@ -235,7 +233,6 @@ def main():
     rdn_id = ray.put(rdn)
     loc_id = ray.put(loc)
     m_loc_id = ray.put(m_loc)
-    #build_line_masks(linebreaks[0], linebreaks[1], rdn, loc, args.atmfile, dt, h2o_band, aod_bands, pixel_size, args.outfile, wl, irr, m_loc)
     jobs = [build_line_masks.remote(linebreaks[_l], linebreaks[_l+1], rdn_id, loc_id, args.atmfile, dt, h2o_band, aod_bands, pixel_size, args.outfile, wl, irrid, m_loc_id) for _l in range(len(linebreaks)-1)]
     rreturn = [ray.get(jid) for jid in jobs]
     ray.shutdown()
