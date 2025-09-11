@@ -33,7 +33,7 @@ import xarray as xr
 import xxhash
 from scipy.interpolate import RegularGridInterpolator
 
-from isofit.core import units
+import units
 
 # small value used in finite difference derivatives
 eps = 1e-5
