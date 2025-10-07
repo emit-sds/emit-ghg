@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. Dates are displayed in UTC.
 
+#### [v0.3.5](https://github.com/emit-sds/emit-ghg/compare/v0.3.4...v0.3.5)
+
+> 7 Oct 2025
+
+* Remove ray by @jfahlen in https://github.com/emit-sds/emit-ghg/pull/45
+
 #### [v0.3.4](https://github.com/emit-sds/emit-ghg/compare/v0.3.3...v0.3.4)
 
 > 24 June 2025
