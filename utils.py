@@ -87,7 +87,7 @@ def convert_to_cog(input_file, output_file,product_metadata,software_build_versi
     metadata['platform'] = "ISS"
     metadata['Conventions'] = "CF-1.63"
     metadata['institution'] = "NASA Jet Propulsion Laboratory/California Institute of Technology"
-    metadata['license'] = "https://creativecommons.org/publicdomain/zero/1.0/"
+    metadata['license'] = "https://www.earthdata.nasa.gov/engage/open-data-services-software-policies/data-use-guidance"
     metadata['naming_authority'] = "LPDAAC"
     metadata['date_created'] = datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%SZ")
     metadata['keywords_vocabulary'] = "NASA Global Change Master Directory (GCMD) Science Keywords"
