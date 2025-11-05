@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. Dates are displayed in UTC.
 
+#### [v0.3.6](https://github.com/emit-sds/emit-ghg/compare/v0.3.5...v0.3.6)
+
+> 5 Nov 2025
+
+* License update by @adamchlus in https://github.com/emit-sds/emit-ghg/pull/49
+* Updating dev from main by @winstonolson in https://github.com/emit-sds/emit-ghg/pull/50
+
 #### [v0.3.5](https://github.com/emit-sds/emit-ghg/compare/v0.3.4...v0.3.5)
 
 > 7 Oct 2025
