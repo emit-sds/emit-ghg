@@ -35,8 +35,6 @@ from utils import SerialEncoder
 import logging
 import os
 
-from scipy.signal import savgol_filter
-
 
 def main(input_args=None):
     parser = argparse.ArgumentParser(description="Robust MF")
@@ -47,7 +45,6 @@ def main(input_args=None):
     parser.add_argument('--covariance_style', type=str, default='looshrinkage', choices=['empirical', 'looshrinkage'], help='style of covariance estimation') 
     parser.add_argument('--fixed_alpha', type=float, default=None, help='fixed value for shrinkage (with looshrinkage covariance style only)')    
     parser.add_argument('--num_cores', type=int, default=-1, help='number of cores (-1 (default))')
-    parser.add_argument('--num_diffmf', type=int, default=1, help='number of diffmf derivatives (1 (default))')
     parser.add_argument('--n_mc', type=int, default=10, help='number of monte carlo runs')
     parser.add_argument('--mc_bag_fraction',type=float, default=0.7, help='fraction of data to use in each MC instance')
     parser.add_argument('--wavelength_range', nargs='+', type=float, default=None, help='wavelengths to use: None = default for gas, 2x values = min/max pairs of regions')         
@@ -133,9 +130,9 @@ def main(input_args=None):
     logging.info('Create output file, initialized with nodata')
     outmeta = ds.metadata
     outmeta['data type'] = np2envitype(np.float32)
-    outmeta['bands'] = 3
-    outmeta['description'] = 'Differential Matched Filter Results'
-    outmeta['band names'] = 'Differential Matched Filter'
+    outmeta['bands'] = 1
+    outmeta['description'] = 'Matched Filter Results'
+    outmeta['band names'] = 'Matched Filter'
     outmeta['interleave'] = 'bil'    
     outmeta['z plot range'] = '{0, 1500}' #adapt to include co2
     outmeta['data ignore value'] = args.nodata_value
@@ -196,16 +193,15 @@ def main(input_args=None):
         good_pixel_mask_for_mf = np.ascontiguousarray(good_pixel_mask.T)
 
         logging.info("applying matched filter")
-        diffmf_output = diffmf_full_scene(rad_for_mf, 
-                                          absorption_coefficients,
-                                          good_pixel_mask_for_mf,
-                                          noise_model_parameters,
-                                          args)
+        output_dat, output_uncert_dat, output_sens_dat = mf_full_scene(rad_for_mf, 
+                                                                       absorption_coefficients,
+                                                                       good_pixel_mask_for_mf,
+                                                                       noise_model_parameters,
+                                                                       args)
 
-        # output_retr_dat.shape -> (lines,samples,bands) for apply_badvalue
-        output_retr_dat = diffmf_output[0].transpose(1,0,2) 
-        output_uncert_dat = diffmf_output[1].transpose(1,0,2) 
-        output_sens_dat = diffmf_output[2].transpose(1,0,2) 
+        output_dat = output_dat.T
+        output_uncert_dat = output_uncert_dat.T
+        output_sens_dat = output_sens_dat.T
 
         def apply_badvalue(d, mask, bad_data_value):
             d[mask] = bad_data_value 
@@ -213,40 +209,41 @@ def main(input_args=None):
 
         if args.mask_clouds_water and clouds_and_surface_water_mask is not None:
             logging.info('Masking clouds and water')
-            output_retr_dat = apply_badvalue(output_retr_dat, clouds_and_surface_water_mask, args.screen_value) 
+            output_dat = apply_badvalue(output_dat, clouds_and_surface_water_mask, args.screen_value) 
             output_uncert_dat = apply_badvalue(output_uncert_dat, clouds_and_surface_water_mask, args.screen_value) 
             output_sens_dat = apply_badvalue(output_sens_dat, clouds_and_surface_water_mask, args.screen_value) 
 
         if args.mask_saturation and saturation is not None:
             logging.info('Masking saturation')
-            output_retr_dat = apply_badvalue(output_retr_dat, saturation, args.screen_value) 
+            output_dat = apply_badvalue(output_dat, saturation, args.screen_value) 
             output_uncert_dat = apply_badvalue(output_uncert_dat, saturation, args.screen_value) 
             output_sens_dat = apply_badvalue(output_sens_dat, saturation, args.screen_value) 
 
         if args.mask_flares and saturation is not None:
             logging.info('Masking saturation')
-            output_retr_dat = apply_badvalue(output_retr_dat, dilated_saturation, args.screen_value) 
+            output_dat = apply_badvalue(output_dat, dilated_saturation, args.screen_value) 
             output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_saturation, args.screen_value) 
             output_sens_dat = apply_badvalue(output_sens_dat, dilated_saturation, args.screen_value) 
-            output_retr_dat = apply_badvalue(output_retr_dat, dilated_flare_mask, args.screen_value) 
+            output_dat = apply_badvalue(output_dat, dilated_flare_mask, args.screen_value) 
             output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_flare_mask, args.screen_value) 
             output_sens_dat = apply_badvalue(output_sens_dat, dilated_flare_mask, args.screen_value) 
 
-        # output_retr_dat.shape -> (lines,bands,samples) for write_bil_chunk
-        output_retr_dat = output_retr_dat.transpose(0,2,1) 
-        output_uncert_dat = output_uncert_dat.transpose(0,2,1)
-        output_sens_dat = output_sens_dat.transpose(0,2,1)
+        output_dat = output_dat[:,None,:]
+        output_uncert_dat = output_uncert_dat[:,None,:]
+        output_sens_dat = output_sens_dat[:,None,:]
 
-        write_bil_chunk(output_retr_dat, args.output_file, ce, chunk_shape)
+        write_bil_chunk(output_dat, args.output_file, ce, chunk_shape)
         if args.uncert_output_file is not None:
             write_bil_chunk(output_uncert_dat, args.uncert_output_file, ce, chunk_shape)
         if args.sens_output_file is not None:
             write_bil_chunk(output_sens_dat, args.sens_output_file, ce, chunk_shape)
         logging.info('Complete')
 
+
 def np2envitype(np_dtype):
     _dtype = np.dtype(np_dtype).char
     return envi.dtype_to_envi[_dtype]
+
 
 def cov(A,**kwargs):
     kwargs.setdefault('ddof',1)
@@ -421,6 +418,7 @@ def noise_model_init(noise_file, wl_nm: np.array):
     noise = np.array([[p_a(w), p_b(w), p_c(w)] for w in (wl_nm)])
     return noise
 
+
 def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, radiance: np.array):
     noise_plus_meas = noise_model_parameters[:, 1] + radiance
     if np.any(noise_plus_meas <= 0):
@@ -429,24 +427,15 @@ def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, rad
     nedl = np.abs(noise_model_parameters[:, 0] * np.sqrt(noise_plus_meas) + noise_model_parameters[:, 2])
     return nedl
 
-def savgol(x,deriv=0,wlen=5,pord=4,delta=1.0,axis=-1):
-    xf = savgol_filter(x, wlen, pord, deriv=deriv, delta=delta,
-                       axis=axis, mode='mirror')
-    return xf
-
-def diffmf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask,
-                      noise_model_parameters, args, nd_buffer=0.0):
+def mf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
     ncross, nalong, nspec = rdn_subset.shape
     print(rdn_subset.shape)
 
-    nderiv = args.num_diffmf
-    
-    diffmf = np.ones((ncross, nalong, nderiv)) * args.nodata_value
-    uncert = np.ones((ncross, nalong, nderiv)) * args.nodata_value
-    sens = np.ones((ncross, nalong, nderiv)) * args.nodata_value
+    mf = np.ones((ncross, nalong)) * args.nodata_value
+    uncert = np.ones((ncross, nalong)) * args.nodata_value
+    sens = np.ones((ncross, nalong)) * args.nodata_value
 
-    no_radiance_mask_full = np.all(np.logical_and(np.isfinite(rdn_subset),
-                                                  rdn_subset > -0.05), axis=2)
+    no_radiance_mask_full = np.all(np.logical_and(np.isfinite(rdn_subset), rdn_subset > -0.05), axis=2)
 
     for col in range(ncross):
         rdn_col = rdn_subset[col,:,:]
@@ -461,64 +450,52 @@ def diffmf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask,
     
         try:
             C = calculate_mf_covariance(rdn_col[good_pixel_idx,:], args.covariance_style, args.fixed_alpha)
-            Cstd = scipy.linalg.sqrtm(scipy.linalg.inv(C, check_finite=False))
+            Cinv = scipy.linalg.inv(C, check_finite=False)
         except np.linalg.LinAlgError:
             logging.warn('singular matrix. skipping this column')
             continue
-        col_mu = np.mean(rdn_col[good_pixel_idx,:], axis=0)
-        tgt_zmw = (absorption_coefficients*col_mu).dot(Cstd)
-        col_zmw = (rdn_col[no_radiance_mask,:]-col_mu).dot(Cstd)                
-        for d in range(nderiv):
-            if d==0: # diffmf(d==0): standard CMF
-                dcol_zmw = col_zmw
-                dtgt_zmw = tgt_zmw
-            else: # diffmf(d>0)
-                dcol_zmw = savgol(col_zmw,deriv=d)
-                dtgt_zmw = savgol(tgt_zmw,deriv=d)
-                
-            dtgt_norm = dtgt_zmw.dot(dtgt_zmw.T)
-            
-            # Matched filter
-            diffmf_col = dcol_zmw.dot(dtgt_zmw.T) / dtgt_norm
-            diffmf[col, no_radiance_mask, d] = diffmf_col * args.ppm_scaling
-        
-            if args.uncert_output_file is not None:
-                ####################################################################################################################
-                # Uncertainty
-                # This implements (s^T Cinv Sigma Cinv s) / (s^T Cinv aX) (in linear algebra notation)
-                # Sigma is diagonal, so we just need a standard numpy multiply, which we can also broadcast along the whole column
-                sC = dtgt_zmw.dot(Cstd)
-                numer = (sC * nedl_variance[no_radiance_mask,:]) @ sC
-                if d==0:
-                    a_times_X = (-1 * absorption_coefficients.copy() * \
-                                 rdn_col[no_radiance_mask, :]).dot(Cstd)
-                    da_times_X = a_times_X
-                else:
-                    da_times_X = savgol(a_times_X,deriv=d)
-                denom = (dtgt_zmw.dot(da_times_X.T))**2
-                uncert_col = np.sqrt(numer/denom)
-                ####################################################################################################################
+        mu = np.mean(rdn_col[good_pixel_idx,:], axis=0)
 
-                sens_col = np.sqrt(denom) / dtgt_norm
+        target = absorption_coefficients * mu
 
-                sens[col,no_radiance_mask,d] = sens_col
-                uncert[col,no_radiance_mask,d] = uncert_col * args.ppm_scaling
+        normalizer = target.dot(Cinv).dot(target.T)
 
-    diffmf[np.logical_and(no_radiance_mask_full, diffmf[...,0] == args.nodata_value)] = args.nodata_value + nd_buffer
-    diffmf[np.logical_not(no_radiance_mask_full)] = args.nodata_value
+        # Matched filter
+        mf_col = target.T.dot(Cinv).dot((rdn_col[no_radiance_mask,:] - mu).T) / normalizer
+        mf[col, no_radiance_mask] = mf_col * args.ppm_scaling
+
+        if args.uncert_output_file is not None:
+            ####################################################################################################################
+            # Uncertainty
+            # This implements (s^T Cinv Sigma Cinv s) / (s^T Cinv aX) (in linear algebra notation)
+            # Sigma is diagonal, so we just need a standard numpy multiply, which we can also broadcast along the whole column
+            sC = target.dot(Cinv)
+            numer = (sC * nedl_variance[no_radiance_mask,:]) @ sC
+            a_times_X = -1 * absorption_coefficients.copy() * rdn_col[no_radiance_mask, :]
+            denom = ((target).dot(Cinv).dot(a_times_X.T))**2
+            uncert_col = np.sqrt(numer/denom)
+            ####################################################################################################################
+
+            sens_col = np.sqrt(denom) / normalizer
+
+            sens[col,no_radiance_mask] = sens_col
+            uncert[col,no_radiance_mask] = uncert_col * args.ppm_scaling
+    
+    mf[np.logical_and(no_radiance_mask_full, mf == args.nodata_value)] = args.nodata_value + nd_buffer
+    mf[np.logical_not(no_radiance_mask_full)] = args.nodata_value
 
     if args.uncert_output_file is not None:
-        uncert[np.logical_and(no_radiance_mask_full, uncert[...,0] == args.nodata_value)] = args.nodata_value + nd_buffer
+        uncert[np.logical_and(no_radiance_mask_full, uncert == args.nodata_value)] = args.nodata_value + nd_buffer
         uncert[np.logical_not(no_radiance_mask_full)] = args.nodata_value
         uncert[np.logical_not(np.isfinite(uncert))] = args.nodata_value
-        sens[np.logical_and(no_radiance_mask_full, sens[...,0] == args.nodata_value)] = args.nodata_value + nd_buffer
+        sens[np.logical_and(no_radiance_mask_full, sens == args.nodata_value)] = args.nodata_value + nd_buffer
         sens[np.logical_not(no_radiance_mask_full)] = args.nodata_value
         sens[np.logical_not(np.isfinite(uncert))] = args.nodata_value
     else:
         uncert = None
         sens = None
 
-    return diffmf.astype(np.float32), uncert, sens
+    return mf.astype(np.float32), uncert, sens
 
 if __name__ == '__main__':
     main()
