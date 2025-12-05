@@ -27,6 +27,11 @@ import sys
 import scipy.linalg
 import scipy.ndimage
 import scipy.interpolate
+
+from scipy.linalg import inv, det, eigh as _eigh
+from scipy.linalg import sqrtm as _sqrtm
+from scipy.linalg import cholesky as _cholesky 
+
 import numpy as np
 from utils import envi_header, write_bil_chunk
 import json
@@ -34,6 +39,9 @@ from utils import SerialEncoder
 
 import logging
 import os
+
+#import torch
+#from torch.linalg import eigh as _teigh
 
 from scipy.signal import savgol_filter
 
@@ -50,7 +58,7 @@ def main(input_args=None):
     parser.add_argument('--num_diffmf', type=int, default=1, help='number of diffmf derivatives (1 (default))')
     parser.add_argument('--n_mc', type=int, default=10, help='number of monte carlo runs')
     parser.add_argument('--mc_bag_fraction',type=float, default=0.7, help='fraction of data to use in each MC instance')
-    parser.add_argument('--wavelength_range', nargs='+', type=float, default=None, help='wavelengths to use: None = default for gas, 2x values = min/max pairs of regions')         
+    parser.add_argument('--wavelength_range', nargs='+', type=float, default=[500, 1340, 1500, 1790, 1950, 2450], help='wavelengths to use: None = default for gas, 2x values = min/max pairs of regions')         
     parser.add_argument('--remove_dominant_pcs',action='store_true', help='remove dominant PCs from covariance calculation')         
     parser.add_argument('--subsample_strategy',type=str,choices=['random','spatial_blocks'], help='sampling strategy for mc runs')         
     parser.add_argument('--l1b_bandmask_file',type=str,default=None, help='path to the l1b bandmask file for saturation')         
@@ -195,17 +203,21 @@ def main(input_args=None):
         
         good_pixel_mask_for_mf = np.ascontiguousarray(good_pixel_mask.T)
 
+        surfmskf = args.output_file + '_surfmsks.npz'
+        surfmsks = dict(possurfmsk=good_pixel_mask_for_mf.copy())
+        np.savez_compressed(surfmskf,**surfmsks,allow_pickle=False)
+        
         logging.info("applying matched filter")
-        diffmf_output = diffmf_full_scene(rad_for_mf, 
-                                          absorption_coefficients,
-                                          good_pixel_mask_for_mf,
-                                          noise_model_parameters,
-                                          args)
+        output_retr_dat, output_uncert_dat,  output_sens_dat = diffmf_full_scene(rad_for_mf, 
+                                                                                 absorption_coefficients,
+                                                                                 good_pixel_mask_for_mf,
+                                                                                 noise_model_parameters,
+                                                                                 args)
 
         # output_retr_dat.shape -> (lines,samples,bands) for apply_badvalue
-        output_retr_dat = diffmf_output[0].transpose(1,0,2) 
-        output_uncert_dat = diffmf_output[1].transpose(1,0,2) 
-        output_sens_dat = diffmf_output[2].transpose(1,0,2) 
+        output_retr_dat   = output_retr_dat.transpose([1,0,2]) 
+        output_uncert_dat = output_uncert_dat.transpose([1,0,2]) 
+        output_sens_dat   = output_sens_dat.transpose([1,0,2]) 
 
         def apply_badvalue(d, mask, bad_data_value):
             d[mask] = bad_data_value 
@@ -301,10 +313,10 @@ def fit_looshrinkage_alpha(data, alphas, I_reg=[]):
             # Proc. SPIE, 2012. eqn. 29
             beta = (1.0-alpha) / (n-1.0)
             G_alpha = n * (beta*S) + (alpha*T)
-            G_det = scipy.linalg.det(G_alpha, check_finite=False)
+            G_det = det(G_alpha, check_finite=False)
             if G_det==0:
                 continue
-            r_k  = (X.dot(scipy.linalg.inv(G_alpha, check_finite=False)) * X).sum(axis=1)
+            r_k  = (X.dot(inv(G_alpha, check_finite=False)) * X).sum(axis=1)
             q = 1.0 - beta * r_k
             nll[i] = 0.5*(nchanlog2pi+np.log(G_det))+1.0/(2.0*n) * \
                      (np.log(q)+(r_k/q)).sum()
@@ -434,6 +446,15 @@ def savgol(x,deriv=0,wlen=5,pord=4,delta=1.0,axis=-1):
                        axis=axis, mode='mirror')
     return xf
 
+def sqrtm(A):
+    # sqrtm slow for large A due to shurr decomposition 
+    #As = _sqrtm(A) 
+    # 2-3x faster approximation (largely identical to sqrtm?)
+    D, V = _eigh(A,check_finite=False)
+    As = (V * np.sqrt(D)) @ V.T
+
+    return As
+
 def diffmf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask,
                       noise_model_parameters, args, nd_buffer=0.0):
     ncross, nalong, nspec = rdn_subset.shape
@@ -451,17 +472,18 @@ def diffmf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask,
     for col in range(ncross):
         rdn_col = rdn_subset[col,:,:]
         no_radiance_mask = no_radiance_mask_full[col,:]
-        good_pixel_idx = np.where(np.logical_and(good_pixel_mask[col,:], no_radiance_mask))[0]
+        good_pixel_idx = np.where(np.logical_and(good_pixel_mask[col,:],
+                                                 no_radiance_mask))[0]
         if len(good_pixel_idx) < 10:
             logging.debug('Too few good pixels found in col {col}: skipping')
             continue
 
         if args.uncert_output_file is not None:
             nedl_variance = (get_noise_equivalent_spectral_radiance(noise_model_parameters, rdn_col))**2
-    
+        
         try:
             C = calculate_mf_covariance(rdn_col[good_pixel_idx,:], args.covariance_style, args.fixed_alpha)
-            Cstd = scipy.linalg.sqrtm(scipy.linalg.inv(C, check_finite=False))
+            Cstd = sqrtm(inv(C, check_finite=False))
         except np.linalg.LinAlgError:
             logging.warn('singular matrix. skipping this column')
             continue
