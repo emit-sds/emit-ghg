@@ -263,9 +263,10 @@ def stage_files(wm, acq, files):
     # Copy to S3 and rename
     for f in files:
         cmd_aws_s3 = [wm.config["aws_cli_exe"], "s3", "cp", f[0], acq.aws_s3_uri_base + f[1], "--profile", wm.config["aws_profile"]]
-        output = subprocess.run(cmd_aws_s3, shell=True, capture_output=True)
+        output = subprocess.run(" ".join(cmd_aws_s3), shell=True, capture_output=True)
         if output.returncode != 0:
-            print("PGE %s run command failed: %s" % (self.repo_name, output.args))
+            print(f"cmd_aws_s3: {' '.join(cmd_aws_s3)}")
+            print("stage_files run command failed: %s" % (output.args))
             raise RuntimeError(output.stderr.decode("utf-8"))
 
 
@@ -408,7 +409,7 @@ def deliver_plm(base_dir, fname, wm, ghg_config):
         fout.write(json.dumps(ummg, indent=2, sort_keys=False, cls=SerialEncoder))
 
     # Copy files to staging server
-    print(f"Staging files to web server")
+    print(f"Staging files to AWS S3 server")
     stage_files(wm, acq, files)
 
     # Build and submit CNM notification
