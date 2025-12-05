@@ -446,13 +446,14 @@ def savgol(x,deriv=0,wlen=5,pord=4,delta=1.0,axis=-1):
                        axis=axis, mode='mirror')
     return xf
 
-def sqrtm(A):
-    # sqrtm slow for large A due to shurr decomposition 
-    #As = _sqrtm(A) 
-    # 2-3x faster approximation (largely identical to sqrtm?)
-    D, V = _eigh(A,check_finite=False)
-    As = (V * np.sqrt(D)) @ V.T
-
+def sqrtm(A,approx=True):
+    if not approx:
+        # scipy.sqrtm slow for large nxn A due to O(n^3) shurr decomposition 
+        As = _sqrtm(A)
+    else:
+        # eigh 2-3x faster approx w/ results ~identical to sqrtm 
+        D, V = _eigh(A,check_finite=False)
+        As = (V * np.where(D!=0,np.sqrt(D),0)) @ V.T
     return As
 
 def diffmf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask,
