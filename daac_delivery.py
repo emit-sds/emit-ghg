@@ -102,13 +102,6 @@ def initialize_ummg(granule_name: str, creation_time: datetime, collection_name:
             }
         }
 
-    # As of 8/16/22 we are expecting related urls to either be in the collection metadata or inserted by the DAAC
-    # ummg['RelatedUrls'] = [{'URL': 'https://earth.jpl.nasa.gov/emit/', 'Type': 'PROJECT HOME PAGE', 'Description': 'Link to the EMIT Project Website.'}]
-    # ummg = add_related_url(ummg, 'https://github.com/emit-sds/emit-documentation', 'VIEW RELATED INFORMATION',
-    #                        description='Link to Algorithm Theoretical Basis Documents', url_subtype='ALGORITHM DOCUMENTATION')
-    # ummg = add_related_url(ummg, 'https://github.com/emit-sds/emit-documentation', 'VIEW RELATED INFORMATION',
-    #                        description='Link to Data User\'s Guide', url_subtype='USER\'S GUIDE')
-
     # Use ProviderDate type "Update" per DAAC. Use this for data granule ProductionDateTime field too.
     ummg['ProviderDates'].append({'Date': creation_time.strftime("%Y-%m-%dT%H:%M:%SZ"), 'Type': "Update"})
     ummg['CollectionReference'] = {
@@ -267,25 +260,13 @@ class SerialEncoder(json.JSONEncoder):
 
 
 def stage_files(wm, acq, files):
-    # Copy files to staging server
-    partial_dir_arg = f"--partial-dir={acq.daac_partial_dir}"
-    target = f"{wm.config['daac_server_internal']}:{acq.daac_staging_dir}/"
-    group = f"emit-{wm.config['environment']}" if wm.config["environment"] in ("test", "ops") else "emit-dev"
-    # This command only makes the directory and changes ownership if the directory doesn't exist
-    cmd_make_target = ["ssh", wm.config["daac_server_internal"], "\"if", "[", "!", "-d",
-                       f"'{acq.daac_staging_dir}'", "];", "then", "mkdir", f"{acq.daac_staging_dir};", "chgrp",
-                       group, f"{acq.daac_staging_dir};", "fi\""]
-    # print(f"cmd_make_target: {' '.join(cmd_make_target)}")
-    output = subprocess.run(" ".join(cmd_make_target), shell=True, capture_output=True)
-    if output.returncode != 0:
-        raise RuntimeError(output.stderr.decode("utf-8"))
-
-    # files is a list of (source, target)
+    # Copy to S3 and rename
     for f in files:
-        cmd_rsync = ["rsync", "-av", partial_dir_arg, f[0], target + f[1]]
-        # print(f"rsync cmd: {' '.join(cmd_rsync)}")
-        output = subprocess.run(" ".join(cmd_rsync), shell=True, capture_output=True)
+        cmd_aws_s3 = [wm.config["aws_cli_exe"], "s3", "cp", f[0], acq.aws_s3_uri_base + f[1], "--profile", wm.config["aws_profile"]]
+        output = subprocess.run(" ".join(cmd_aws_s3), shell=True, capture_output=True)
         if output.returncode != 0:
+            print(f"cmd_aws_s3: {' '.join(cmd_aws_s3)}")
+            print("stage_files run command failed: %s" % (output.args))
             raise RuntimeError(output.stderr.decode("utf-8"))
 
 
@@ -294,7 +275,7 @@ def submit_cnm_notification(wm, acq, base_dir, granule_ur, files, formats, colle
     utc_now = datetime.datetime.now(tz=datetime.timezone.utc)
     cnm_submission_id = f"{granule_ur}_{utc_now.strftime('%Y%m%dt%H%M%S')}"
     cnm_submission_path = os.path.join(base_dir, cnm_submission_id + "_cnm.json")
-    # TODO: Use S3 provider?
+
     provider = wm.config["daac_provider_forward"]
     queue_url = wm.config["daac_submission_url_forward"]
 
@@ -314,7 +295,7 @@ def submit_cnm_notification(wm, acq, base_dir, granule_ur, files, formats, colle
         notification["product"]["files"].append(
             {
                 "name": f[1],
-                "uri": acq.daac_uri_base + f[1],
+                "uri": acq.aws_s3_uri_base + f[1],
                 "type": formats[i],
                 "size": os.path.getsize(f[0]),
                 "checksumType": "sha512",
@@ -337,76 +318,6 @@ def submit_cnm_notification(wm, acq, base_dir, granule_ur, files, formats, colle
     output = subprocess.run(" ".join(cmd_aws), shell=True, capture_output=True)
     if output.returncode != 0:
         raise RuntimeError(output.stderr.decode("utf-8"))
-
-
-def deliver_enh(base_dir, fname, wm, ghg_config):
-    if "ch4" in fname:
-        GHG = "CH4"
-    elif "co2" in fname:
-        GHG = "CO2"
-    else:
-        print("Unable to match a GHG for enh delivery.  Returning...")
-        return
-    print(f"Doing {GHG} enh delivery with fname {fname}")
-
-    # Get scene details and create Granule UR
-    # Example granule_ur: EMIT_L2B_{CH4,CO2}ENH_001_20230805T195459_2321713_001
-    acq = wm.acquisition
-    collection = f"EMITL2B{GHG}ENH"
-    prod_type = f"{GHG}ENH"
-    granule_ur = f"EMIT_L2B_{prod_type}_{ghg_config['collection_version']}_{acq.start_time.strftime('%Y%m%dT%H%M%S')}_{acq.orbit}_{acq.daac_scene}"
-
-    # Create local/tmp daac names and paths
-    local_enh_path = os.path.join(base_dir, fname)
-    local_browse_path = local_enh_path.replace(".tif", ".png")
-    local_ummg_path = local_enh_path.replace(".tif", ".cmr.json")
-    daac_enh_name = f"{granule_ur}.tif"
-    daac_browse_name = f"{granule_ur}.png"
-    daac_ummg_name = f"{granule_ur}.cmr.json"
-    # daac_ummg_path = os.path.join(base_dir, daac_ummg_name)
-    files = [(local_enh_path, daac_enh_name),
-             (local_browse_path, daac_browse_name),
-             (local_ummg_path, daac_ummg_name)]
-    # print(f"files: {files}")
-
-    # Get the software_build_version (extended build num when product was created)
-    hdr = envi.read_envi_header(acq.rdn_hdr_path)
-    sds_software_build_version = hdr["emit software build version"]
-
-    # Get ghg_software_build_version
-    ds = gdal.Open(os.path.join(base_dir, fname))
-    meta = ds.GetMetadata()
-    ghg_software_build_version = meta["software_build_version"]
-
-    # Get mean solar azimuth and zenith
-    mean_solar_azimuth = get_band_mean(acq.obs_img_path, 3)
-    mean_solar_zenith = get_band_mean(acq.obs_img_path, 4)
-
-    # Create the UMM-G file
-    print(f"Creating ummg file at {local_ummg_path}")
-    tif_creation_time = datetime.datetime.fromtimestamp(os.path.getmtime(local_enh_path), tz=datetime.timezone.utc)
-    daynight = "Day" if acq.submode == "science" else "Night"
-    ummg = initialize_ummg(granule_ur, tif_creation_time, collection, ghg_config["collection_version"],
-                           acq.start_time, acq.stop_time, ghg_config["repo_name"], ghg_config["repo_version"],
-                           sds_software_build_version=sds_software_build_version,
-                           ghg_software_build_version=ghg_software_build_version,
-                           ghg_software_delivery_version=ghg_config["repo_version"],
-                           doi=ghg_config["dois"][collection], orbit=int(acq.orbit), orbit_segment=int(acq.scene),
-                           scene=int(acq.daac_scene), solar_zenith=mean_solar_zenith,
-                           solar_azimuth=mean_solar_azimuth, cloud_fraction=acq.cloud_fraction)
-    ummg = add_data_files_ummg(ummg, files[:2], daynight, ["TIFF", "PNG"])
-
-    ummg = add_boundary_ummg(ummg, acq.gring)
-    with open(local_ummg_path, 'w', errors='ignore') as fout:
-        fout.write(json.dumps(ummg, indent=2, sort_keys=False, cls=SerialEncoder))
-
-    # Copy files to staging server
-    print(f"Staging files to web server")
-    stage_files(wm, acq, files)
-
-    # Build and submit CNM notification
-    submit_cnm_notification(wm, acq, base_dir, granule_ur, files, ["data", "browse", "metadata"], collection,
-                            ghg_config["collection_version"])
 
 
 def deliver_plm(base_dir, fname, wm, ghg_config):
@@ -443,8 +354,8 @@ def deliver_plm(base_dir, fname, wm, ghg_config):
              (local_ummg_path, daac_ummg_name)]
     # print(f"files: {files}")
 
-    # Get the software_build_version (extended build num when product was created)
-    hdr = envi.read_envi_header(acq.rdn_hdr_path)
+    # Get the software_build_version (extended build num when GHG enhancement data product was created)
+    hdr = envi.read_envi_header(acq.ch4_hdr_path) if GHG == "CH4" else envi.read_envi_header(acq.co2_hdr_path)
     sds_software_build_version = hdr["emit software build version"]
 
     # Get ghg_software_build_version
@@ -474,7 +385,6 @@ def deliver_plm(base_dir, fname, wm, ghg_config):
     # Create the UMM-G file
     print(f"Creating ummg file at {local_ummg_path}")
     tif_creation_time = datetime.datetime.fromtimestamp(os.path.getmtime(local_plm_path), tz=datetime.timezone.utc)
-    daynight = "Day" if acq.submode == "science" else "Night"
     ummg = initialize_ummg(granule_ur, tif_creation_time, collection, ghg_config["collection_version"],
                            acq.start_time, acq.stop_time, ghg_config["repo_name"], ghg_config["repo_version"],
                            sds_software_build_version=sds_software_build_version,
@@ -483,7 +393,7 @@ def deliver_plm(base_dir, fname, wm, ghg_config):
                            doi=ghg_config["dois"][collection], orbit=int(acq.orbit), orbit_segment=int(acq.scene),
                            solar_zenith=mean_solar_zenith, solar_azimuth=mean_solar_azimuth,
                            cloud_fraction=mean_cloud_fraction, source_scenes=source_scenes, plume_id=int(plume_id))
-    ummg = add_data_files_ummg(ummg, files[:3], daynight, ["TIFF", "JSON", "PNG"])
+    ummg = add_data_files_ummg(ummg, files[:3], acq.daynight, ["TIFF", "JSON", "PNG"])
 
     with open(local_geojson_path) as f:
         geojson =json.load(f)
@@ -499,7 +409,7 @@ def deliver_plm(base_dir, fname, wm, ghg_config):
         fout.write(json.dumps(ummg, indent=2, sort_keys=False, cls=SerialEncoder))
 
     # Copy files to staging server
-    print(f"Staging files to web server")
+    print(f"Staging files to AWS S3 server")
     stage_files(wm, acq, files)
 
     # Build and submit CNM notification
@@ -548,9 +458,7 @@ def main():
     print(f"Getting workflow manager with acq_id {acq_id}")
     wm = WorkflowManager(config_path=sds_config_path, acquisition_id=acq_id)
 
-    if "enh" in fname:
-        deliver_enh(base_dir, fname, wm, ghg_config)
-    elif "Plume" in fname:
+    if "Plume" in fname:
         deliver_plm(base_dir, fname, wm, ghg_config)
 
 
