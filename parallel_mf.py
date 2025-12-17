@@ -446,9 +446,10 @@ def savgol(x,deriv=0,wlen=5,pord=4,delta=1.0,axis=-1):
                        axis=axis, mode='mirror')
     return xf
 
-def sqrtm(A,approx=True):
+def sqrtm(A,approx=False):
     if not approx:
-        # scipy.sqrtm slow for large nxn A due to O(n^3) shurr decomposition 
+        # scipy.sqrtm (can be) slow for large A
+        # due to O(n^3) schur decomposition 
         As = _sqrtm(A)
     else:
         # eigh 2-3x faster approx w/ results ~identical to sqrtm 
