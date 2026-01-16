@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. Dates are displayed in UTC.
 
+#### [v0.3.7](https://github.com/emit-sds/emit-ghg/compare/v0.3.6...v0.3.7)
+
+> 16 Jan 2026
+
+* S3 delivery by @winstonolson in https://github.com/emit-sds/emit-ghg/pull/52
+* Update to handle DCIDs that cross or are east of east antimeridian by @adamchlus in https://github.com/emit-sds/emit-ghg/pull/53
+* Merging main into dev to get latest mosaic code by @winstonolson in https://github.com/emit-sds/emit-ghg/pull/54
+
 #### [v0.3.6](https://github.com/emit-sds/emit-ghg/compare/v0.3.5...v0.3.6)
 
 > 5 Nov 2025
