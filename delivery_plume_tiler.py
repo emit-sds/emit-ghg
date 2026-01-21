@@ -186,13 +186,14 @@ def main(input_args=None):
     parser = argparse.ArgumentParser(description="Delineate/colorize plume")
     parser.add_argument('--source_dir', type=str, default='methane_20230813')
     parser.add_argument('--dest_dir', type=str, default='visions_delivery')
-    parser.add_argument('--manual_del_dir', type=str, default='/beegfs/scratch/brodrick/methane/ch4_plumedir_scenetest/')
+    parser.add_argument('--manual_del_dir', type=str, default='/store/brodrick/methane/ch4_plumedir_scenetest/')
     parser.add_argument('--software_version', type=str, default=None)
     parser.add_argument('--data_version', type=str, default=None)
     parser.add_argument('--visions_delivery', type=int, choices=[0,1,2],default=0)
     parser.add_argument('--n_cores', type=int, default=1)
     parser.add_argument('--overwrite', action='store_true')
-    parser.add_argument('--previous_plume_file', type=str, default='visions_delivery/plume_list.txt')
+    parser.add_argument('--delivery_dir', type=str, default='visions_delivery')
+    parser.add_argument('--previous_plume_file', type=str, default='plume_list.txt')
     parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')    
     args = parser.parse_args(input_args)
@@ -202,7 +203,7 @@ def main(input_args=None):
 
     tile_dir = os.path.join(args.dest_dir, 'ch4_plume_tiles')
 
-    with open(args.previous_plume_file,'r') as f:
+    with open(os.path.join(args.delivery_dir, args.previous_plume_file),'r') as f:
         delivered_plume_names = f.read().splitlines()
         delivered_plume_ids = [f'CH4_PlumeComplex-{x.split("_")[-1]}' for x in delivered_plume_names]
 
@@ -318,7 +319,7 @@ def main(input_args=None):
 
         with open(os.path.join(args.dest_dir, 'combined_plume_metadata.json'), 'w') as fout:
             fout.write(json.dumps(outdict, cls=SerialEncoder)) 
-        subprocess.call("rsync visions_delivery/combined_plume_metadata.json brodrick@${EMIT_SCIENCE_IP}:/data/emit/mmgis/coverage/combined_plume_metadata.json",shell=True)
+        subprocess.call(f"rsync {args.delivery_dir}/combined_plume_metadata.json brodrick@${EMIT_SCIENCE_IP}:/data/emit/mmgis/coverage/combined_plume_metadata.json",shell=True)
 
     
         logging.info('Tile output')
@@ -329,7 +330,7 @@ def main(input_args=None):
             subfeatures = [feat for _feat, feat in enumerate(all_plume_meta['features']) if _feat in match_idx and _feat in valid_plume_idx]
             if len(subfeatures) > 0:
                 tile_dcid(subfeatures, outdir, args.manual_del_dir)
-        subprocess.call("rsync -a --info=progress2 visions_delivery/visions_ch4_tiles/ brodrick@${EMIT_SCIENCE_IP}:/data/emit/mmgis/mosaics/ch4_plume_tiles/",shell=True)
+        subprocess.call(f"rsync -a --info=progress2 {outdir} brodrick@${EMIT_SCIENCE_IP}:/data/emit/mmgis/mosaics/ch4_plume_tiles/",shell=True)
     
 
 
