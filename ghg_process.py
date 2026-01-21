@@ -23,11 +23,10 @@ import os
 import target_generation
 import parallel_mf
 import scale
-import apply_glt
-from spectral.io import envi
 import numpy as np
-from utils import envi_header, convert_to_cog
-from files import Filenames
+from utils import convert_to_cog
+from files import Filenames, AV3_DAAC_Filenames, EMIT_DAAC_Filenames
+import spec_io
 
 metadata = {
     'ch4': {
@@ -93,19 +92,19 @@ def main(input_args=None):
     if args.wavelength_range is not None and len(args.wavelength_range) % 2 != 0:
         raise ValueError('wavelength_range must have an even number of elements')
 
-    radiance_file = args.radiance_file
-    radiance_file_hdr = envi_header(radiance_file)
-
-    obs_file = args.obs_file
-    obs_file_hdr = envi_header(obs_file)
-
-    loc_file = args.loc_file
-    loc_file_hdr = envi_header(loc_file)
-
     logging.basicConfig(format='%(levelname)s:%(asctime)s ||| %(message)s', level=args.loglevel,
                         filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
 
-    files = Filenames(args.output_base)
+    gas = 'ch4'
+    if args.co2:
+        gas = 'co2'
+
+    if 'AV3' in args.radiance_file and args.radiance_file.endswith('.nc'):
+        files = AV3_DAAC_Filenames(args.output_base, args.radiance_file, gas)
+    elif 'EMIT' in args.radiance_file and args.radiance_file.endswith('.nc'):
+        files = EMIT_DAAC_Filenames(args.output_base, args.radiance_file, gas)
+    else:
+        files = Filenames(args.output_base)
 
     # if os.path.isfile(files.mf_file):
     #     dat = gdal.Open(files.mf_file).ReadAsArray()
@@ -115,35 +114,42 @@ def main(input_args=None):
     print(files.target_file)
 
     if os.path.isfile(files.target_file) is False or args.overwrite:
-        sza = envi.open(obs_file_hdr).open_memmap(interleave='bip')[...,4]
+        _, obs = spec_io.load_data(args.obs_file)
+        sza = obs[...,4]
         mean_sza = np.mean(sza[sza != -9999])
 
-        elevation = envi.open(loc_file_hdr).open_memmap(interleave='bip')[...,2]
+        _, elevation = spec_io.load_data(args.loc_file, return_loc_from_l1b_rad_nc=True)
+        elevation = elevation[:,:,2]
         mean_elevation = np.mean(elevation[elevation != -9999]) / 1000.
         mean_elevation = min(max(0, mean_elevation),3)
 
+        altitude = (np.float64(obs[:,:,0]) * np.cos(np.float64(obs[:,:,2]) * np.pi / 180.) + np.float64(elevation)) / 1000.
+        mean_altitude = np.mean(altitude[elevation != -9999])
+
         if args.state_subs is not None:
-            state_ds = envi.open(envi_header(args.state_subs))
-            band_names = state_ds.metadata['band names']
-            h2o = state_ds.open_memmap(interleave='bip')[...,band_names.index('H2OSTR')]
-            mean_h2o = np.mean(h2o[h2o != -9999])
+
+            m_state, d_state = spec_io.load_data(args.state_subs, mask_type='mask')
+            if args.state_subs.endswith('.nc'):
+                ind = m_state.band_names.index('H2O (g cm-2)')
+                mean_h2o = np.mean(d_state[:,:,ind])
+            else:
+                ind = m_state.band_names.index('H2OSTR')
+                mean_h2o = np.mean(d_state[:,0,ind])
+
         else:
             # Just guess something...
-            exit()
-            mean_h2o = 1.3
-
-    gas = 'ch4'
-    if args.co2:
-        gas = 'co2'
+            #exit()
+            # For AV3
+            mean_h2o = 2.5
 
     # Run target generation
     if (os.path.isfile(files.target_file) is False or args.overwrite):
         target_params = ['-z', str(mean_sza),
-                         '-s', '100',
+                         '-s', str(mean_altitude),
                          '-g', str(mean_elevation),
                          '-w', str(mean_h2o),
                          '--output', files.target_file,
-                         '--hdr', radiance_file_hdr,
+                         '--hdr', args.radiance_file,
                          '--lut_dataset', args.lut_file]
         if args.co2:
             target_params.append('--co2')
@@ -159,13 +165,15 @@ def main(input_args=None):
                    files.mf_file,
                    '--n_mc', '1',
                    '--l1b_bandmask_file', args.l1b_bandmask_file,
-                   '--l2a_mask_file', args.l2a_mask_file,
                    '--fixed_alpha', '0.0000000001',
                    '--mask_clouds_water',
                    '--flare_outfile', files.flare_file,
                    '--noise_parameters_file', args.noise_file,
                    '--sens_output_file', files.mf_sens_file,
                    '--uncert_output_file', files.mf_uncert_file]
+
+        if args.l2a_mask_file.lower() != 'none':
+            subargs.extend(['--l2a_mask_file', args.l2a_mask_file])
 
         if args.wavelength_range is not None:
             subargs.extend(['--wavelength_range'] + [str(val) for val in args.wavelength_range])
@@ -176,10 +184,21 @@ def main(input_args=None):
         if args.ace_filter:
             subargs.append('--use_ace_filter')
         parallel_mf.main(subargs)
+    
+    def do_ortho_with_spec_io(obs_for_glt_filename, unortho_input_filename, ortho_output_filename):
+        m_obs, _ = spec_io.load_data(obs_for_glt_filename, load_glt=True)
+        m, d = spec_io.load_data(unortho_input_filename)
+        d_ort = spec_io.ortho_data(d, m_obs.glt)
+        m.geotransform = m_obs.geotransform
+        m.projection = m_obs.projection
+        if ortho_output_filename.endswith('.tif'):
+            spec_io.write_geotiff(d_ort, m, ortho_output_filename)
+        else:
+            spec_io.write_envi_file(d_ort, m, ortho_output_filename)
 
     # ORT MF
     if (os.path.isfile(files.mf_ort_file) is False or args.overwrite):
-        apply_glt.main([args.glt_file, files.mf_file, files.mf_ort_file])
+        do_ortho_with_spec_io(args.glt_file, files.mf_file, files.mf_ort_file)
         convert_to_cog(files.mf_ort_file,
                        files.mf_ort_cog,
                        metadata[gas]['mf'],
@@ -187,7 +206,7 @@ def main(input_args=None):
                        args.product_version)
     # ORT Sensitivity
     if os.path.isfile(files.sens_ort_file) is False or args.overwrite:
-        apply_glt.main([args.glt_file, files.mf_sens_file, files.sens_ort_file])
+        do_ortho_with_spec_io(args.glt_file, files.mf_sens_file, files.sens_ort_file)
     if os.path.isfile(files.sens_ort_cog) is False or args.overwrite:
         convert_to_cog(files.sens_ort_file,
                        files.sens_ort_cog,
@@ -196,7 +215,7 @@ def main(input_args=None):
                        args.product_version)
     # ORT Uncertainty
     if os.path.isfile(files.uncert_ort_file) is False or args.overwrite:
-        apply_glt.main([args.glt_file, files.mf_uncert_file, files.uncert_ort_file])
+        do_ortho_with_spec_io(args.glt_file, files.mf_uncert_file, files.uncert_ort_file)
     if os.path.isfile(files.uncert_ort_cog) is False or args.overwrite:
         convert_to_cog(files.uncert_ort_file,
                        files.uncert_ort_cog,
