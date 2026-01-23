@@ -38,11 +38,6 @@ def create_clip(ds, gt, lon, lat, bounds, file):
         clip_ds.GetRasterBand(i + 1).SetNoDataValue(-9999)
     clip_ds.FlushCache()
 
-input_files = ['/Users/achlus/data1/temp/emit20250807t232723_o21915_s001_ghg_ortch4_b0106_v02.tif',
-       '/Users/achlus/data1/temp/emit20250807t232659_o21915_s001_ghg_ortch4_b0106_v02.tif',
-       '/Users/achlus/data1/temp/emit20250807t232647_o21915_s001_ghg_ortch4_b0106_v02.tif']
-output_file = 'out.tif'
-
 def create_mosaic(input_files, output_file):
     west_files = []
     east_files = []
