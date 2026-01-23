@@ -20,6 +20,8 @@ def process_file(f, ulx, lrx):
     return ds, band1, gt, lon, lat
 
 def create_clip(ds, gt, lon, lat, bounds, file):
+
+
     top, bottom, left, right = bounds
     driver = gdal.GetDriverByName('GTiff')
     rows = int(bottom + 1 - top)
@@ -35,6 +37,11 @@ def create_clip(ds, gt, lon, lat, bounds, file):
         clip_ds.GetRasterBand(i + 1).WriteArray(band[top:bottom + 1, left:right + 1])
         clip_ds.GetRasterBand(i + 1).SetNoDataValue(-9999)
     clip_ds.FlushCache()
+
+input_files = ['/Users/achlus/data1/temp/emit20250807t232723_o21915_s001_ghg_ortch4_b0106_v02.tif',
+       '/Users/achlus/data1/temp/emit20250807t232659_o21915_s001_ghg_ortch4_b0106_v02.tif',
+       '/Users/achlus/data1/temp/emit20250807t232647_o21915_s001_ghg_ortch4_b0106_v02.tif']
+output_file = 'out.tif'
 
 def create_mosaic(input_files, output_file):
     west_files = []
@@ -57,17 +64,23 @@ def create_mosaic(input_files, output_file):
             ds, band1, gt, lon, lat = process_file(f, ulx, lrx)
             lright = np.argwhere(lon >= 179.999)[0][0]
             lband = band1[:, :lright + 1]
-            ltop, lbottom = np.argwhere(np.sum(lband == -9999, axis=1) != lband.shape[1])[[0, -1]].flatten()
-            left_bounds = [ltop, lbottom, 0, lright]
+
+            if np.any(lband != -9999):
+                ltop, lbottom = np.argwhere(np.sum(lband == -9999, axis=1) != lband.shape[1])[[0, -1]].flatten()
+                left_bounds = [ltop, lbottom, 0, lright]
+                create_clip(ds, gt, lon, lat, left_bounds, left_out)
+                east_files.append(left_out)
+
             rleft = np.argwhere(lon >= 180.001)[0][0]
             rright = band1.shape[1] - 1
             rband = band1[:, rleft:]
-            rtop, rbottom = np.argwhere(np.sum(rband == -9999, axis=1) != rband.shape[1])[[0, -1]].flatten()
-            right_bounds = [rtop, rbottom, rleft, rright]
-            for bounds, file in zip([left_bounds, right_bounds], [left_out, right_out]):
-                create_clip(ds, gt, lon, lat, bounds, file)
-            west_files.append(right_out)
-            east_files.append(left_out)
+
+            if np.any(rband != -9999):
+                rtop, rbottom = np.argwhere(np.sum(rband == -9999, axis=1) != rband.shape[1])[[0, -1]].flatten()
+                right_bounds = [rtop, rbottom, rleft, rright]
+                create_clip(ds, gt, lon, lat, right_bounds, right_out)
+                west_files.append(right_out)
+
         elif ulx > 180:
             print('  Lies east of east antimeridian, moving west\n')
 
