@@ -1,6 +1,12 @@
 ### Changelog
 
-All notable changes to this project will be documented in this file. Dates are displayed in UTC.
+All notable changes to this project will be documented in this file.
+
+#### [v0.3.8](https://github.com/emit-sds/emit-ghg/compare/v0.3.7...v0.3.8)
+
+> 26 Jan 2026
+
+* Mosaic bug fix by @adamchlus in https://github.com/emit-sds/emit-ghg/pull/56
 
 #### [v0.3.7](https://github.com/emit-sds/emit-ghg/compare/v0.3.6...v0.3.7)
 
