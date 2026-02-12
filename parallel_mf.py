@@ -32,6 +32,8 @@ from utils import envi_header, write_bil_chunk
 import json
 from utils import SerialEncoder
 
+import spec_io
+
 import logging
 import os
 
@@ -84,11 +86,9 @@ def main(input_args=None):
                         filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
    
     logging.info('Started processing input file: "%s"'%str(args.radiance_file))
-    ds = envi.open(envi_header(args.radiance_file),image=args.radiance_file)
-    if 'wavelength' not in ds.metadata:
-        logging.error('wavelength field not found in input header')
-        sys.exit(0)
-    wavelengths = np.array([float(x) for x in ds.metadata['wavelength']])
+    m_radiance, radiance = spec_io.load_data(args.radiance_file) # nalong x ncross x nbands
+    radiance = np.array(radiance).transpose([0,2,1]) # nalong x nbands x ncross
+    wavelengths = m_radiance.wavelengths
 
     if args.wavelength_range is None:
         if 'ch4' in args.library:
@@ -111,7 +111,7 @@ def main(input_args=None):
         la = np.where(np.logical_and(wavelengths > args.wavelength_range[2*n], wavelengths <= args.wavelength_range[2*n+1]))[0]
         active_wl_idx.extend(la.tolist())
     always_exclude_idx = []
-    if 'emit' in args.radiance_file:
+    if 'emit' in args.radiance_file.lower():
         always_exclude_idx = np.where(np.logical_and(wavelengths < 1321, wavelengths > 1275))[0].tolist()
     active_wl_idx = np.array([x for x in active_wl_idx if x not in always_exclude_idx])
 
@@ -128,7 +128,9 @@ def main(input_args=None):
     absorption_coefficients = library_reference[active_wl_idx,2]
 
     logging.info('Create output file, initialized with nodata')
-    outmeta = ds.metadata
+    outmeta = {}
+    outmeta['samples'] = radiance.shape[2] # ncross
+    outmeta['lines'] = radiance.shape[0] # nalong
     outmeta['data type'] = np2envitype(np.float32)
     outmeta['bands'] = 1
     outmeta['description'] = 'Matched Filter Results'
@@ -152,7 +154,6 @@ def main(input_args=None):
         output_ds = envi.create_image(envi_header(args.sens_output_file),outmeta,force=True,ext='')
         del output_ds
         write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.sens_output_file, 0, output_shape)
-
  
     if args.chunksize is None:
         chunk_edges = [0, output_shape[0]]
@@ -163,9 +164,8 @@ def main(input_args=None):
     for _ce, ce in enumerate(chunk_edges[:-1]):
         
         logging.info(f"load radiance for chunk {_ce +1} / {len(chunk_edges) - 1}")
-        radiance = np.ascontiguousarray(ds.open_memmap(interleave='bil',writeable=False)[ce:chunk_edges[_ce+1],...].copy())
-        rad_for_mf = np.float64(radiance[:,active_wl_idx,:])
-        rad_for_mf = np.ascontiguousarray(rad_for_mf.transpose([2,0,1]))
+        radiance = radiance[ce:chunk_edges[_ce+1],...]
+        rad_for_mf = np.float64(np.ascontiguousarray(radiance[:,active_wl_idx,:].transpose([2,0,1]))) #ncross x nalong x nbands
         chunk_shape = (chunk_edges[_ce+1] - ce, output_shape[1], output_shape[2])
 
         logging.info("load masks")
@@ -187,15 +187,17 @@ def main(input_args=None):
         logging.debug("adding cloud / water mask")
         clouds_and_surface_water_mask = None
         if args.l2a_mask_file is not None:
-            clouds_and_surface_water_mask = np.sum(envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')[ce:chunk_edges[_ce+1],:,:3],axis=-1) > 0
+            _, clouds_and_surface_water_mask = spec_io.load_data(args.l2a_mask_file, mask_type='mask')
+            clouds_and_surface_water_mask = clouds_and_surface_water_mask[ce:chunk_edges[_ce+1],:,:3]
+            clouds_and_surface_water_mask = np.sum(clouds_and_surface_water_mask, axis=-1) > 0
             good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
         
-        good_pixel_mask_for_mf = np.ascontiguousarray(good_pixel_mask.T)
+        good_pixel_mask = np.ascontiguousarray(good_pixel_mask.T)
 
         logging.info("applying matched filter")
         output_dat, output_uncert_dat, output_sens_dat = mf_full_scene(rad_for_mf, 
                                                                        absorption_coefficients,
-                                                                       good_pixel_mask_for_mf,
+                                                                       good_pixel_mask,
                                                                        noise_model_parameters,
                                                                        args)
 
@@ -389,10 +391,9 @@ def calculate_saturation_mask(bandmask_file: str, radiance: np.array, dilation_i
     has been otherwise flagged with bad values (-9999). The bad9999 mask identifies these and
     excludes them.'''
 
-    if chunk_edges is None:
-        l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[:,:,:]
-    else:
-        l1b_bandmask_loaded = envi.open(envi_header(bandmask_file))[chunk_edges[0]:chunk_edges[1],:,:]
+    _, l1b_bandmask_loaded = spec_io.load_data(bandmask_file, mask_type='band_mask')
+    if chunk_edges is not None:
+        l1b_bandmask_loaded = l1b_bandmask_loaded[chunk_edges[0]:chunk_edges[1],:,:]
 
     bad9999 = np.any(radiance < -1, axis = 1)
     l1b_bandmask_unpacked = np.unpackbits(l1b_bandmask_loaded, axis= -1)
@@ -427,18 +428,31 @@ def get_noise_equivalent_spectral_radiance(noise_model_parameters: np.array, rad
     nedl = np.abs(noise_model_parameters[:, 0] * np.sqrt(noise_plus_meas) + noise_model_parameters[:, 2])
     return nedl
 
-def mf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
-    ncross, nalong, nspec = rdn_subset.shape
-    print(rdn_subset.shape)
+def mf_full_scene(rdn, absorption_coefficients, good_pixel_mask, noise_model_parameters, args, nd_buffer=0.1):
+    '''Compute the matched filter for the entire scene along with sensitivity and uncertainty
+    
+    Args:
+        rdn (nd.array): radiance [ncross, nalong, nbands]
+        absorption_coefficient (nd.array): the absorption coefficient vector
+        good_pixel_mask (nd.array): pixels to use in MF [ncross, nalong]
+        noise_model_parameters (nd.array): instrument noise coefficients
+        args: the argparse arguments when this script was called
+    
+    Returns:
+        mf (nd.array): matched filter values [ncross, nalong]
+        uncert (nd.array): uncertainty values [ncross, nalong]
+        sens (nd.array): sensitivity values [ncross, nalong]
+    '''
+    ncross, nalong, nspec = rdn.shape
 
     mf = np.ones((ncross, nalong)) * args.nodata_value
     uncert = np.ones((ncross, nalong)) * args.nodata_value
     sens = np.ones((ncross, nalong)) * args.nodata_value
 
-    no_radiance_mask_full = np.all(np.logical_and(np.isfinite(rdn_subset), rdn_subset > -0.05), axis=2)
+    no_radiance_mask_full = np.all(np.logical_and(np.isfinite(rdn), rdn> -0.05), axis=2)
 
     for col in range(ncross):
-        rdn_col = rdn_subset[col,:,:]
+        rdn_col = rdn[col,:,:]
         no_radiance_mask = no_radiance_mask_full[col,:]
         good_pixel_idx = np.where(np.logical_and(good_pixel_mask[col,:], no_radiance_mask))[0]
         if len(good_pixel_idx) < 10:
@@ -465,17 +479,14 @@ def mf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask, noise_mo
         mf[col, no_radiance_mask] = mf_col * args.ppm_scaling
 
         if args.uncert_output_file is not None:
-            ####################################################################################################################
-            # Uncertainty
-            # This implements (s^T Cinv Sigma Cinv s) / (s^T Cinv aX) (in linear algebra notation)
+            # Sensitivity and Uncertainty
+            # This implements (s^T Cinv Sigma Cinv s) / (s^T Cinv aX) (in linear algebra notation) for the uncertainty
             # Sigma is diagonal, so we just need a standard numpy multiply, which we can also broadcast along the whole column
             sC = target.dot(Cinv)
             numer = (sC * nedl_variance[no_radiance_mask,:]) @ sC
-            a_times_X = -1 * absorption_coefficients.copy() * rdn_col[no_radiance_mask, :]
+            a_times_X = -1 * absorption_coefficients * rdn_col[no_radiance_mask, :]
             denom = ((target).dot(Cinv).dot(a_times_X.T))**2
             uncert_col = np.sqrt(numer/denom)
-            ####################################################################################################################
-
             sens_col = np.sqrt(denom) / normalizer
 
             sens[col,no_radiance_mask] = sens_col
