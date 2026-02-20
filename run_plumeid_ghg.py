@@ -36,12 +36,12 @@ def main(input_args=None):
 
     plumedict = json.load(open(args.methane_metadata,'r'))
 
-    fids = [x['properties']['Scene FID'] for x in plumedict['features']]
+    #fids = [x['properties']['Scene FIDs'] for x in plumedict['features']]
+    fids = np.unique([sublist for feat in plumedict['features'] for sublist in feat['properties']['Scene FIDs']])
 
-    un_fids = np.unique(fids)
     rdn_files = []
-    for fid in un_fids:
-        glist = glob(f'/beegfs/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid}/l1b/*_rdn_b0106_v01.img')
+    for fid in fids:
+        glist = glob(f'/store/emit/ops/data/acquisitions/{fid[4:12]}/{fid}/l1b/*_rdn_b0106_v01.img')
         if len(glist) > 0:
             rdn_files.append(glist[0])
         else:
@@ -50,7 +50,7 @@ def main(input_args=None):
         if rdn_files[_fid] is None:
             rdn_files.pop(_fid)
             fids.pop(_fid)
-    un_fids = np.unique(fids)
+    fids = np.unique(fids)
 
     obs_files = [x.replace('rdn','obs') for x in rdn_files]
     loc_files = [x.replace('rdn','loc') for x in rdn_files]
@@ -61,7 +61,7 @@ def main(input_args=None):
     state_files = [x.replace('l1b','l2a').replace('rdn','statesubs') for x in rdn_files]
     state_files = [x if os.path.isfile(x) else None for x in state_files]
 
-    for fid in un_fids:
+    for fid in fids:
         date = fid[4:12]
         if os.path.isdir(os.path.join(args.output_dir, date)) is False:
             subprocess.call(f'mkdir {os.path.join(args.output_dir, date)}',shell=True)
@@ -76,10 +76,10 @@ def main(input_args=None):
 
       launch = os.path.isfile(ch4_mf_kmz_file) is False
       if os.path.isfile(ch4_mf_kmz_file) is False or (args.co2 and os.path.isfile(co2_mf_kmz_file) is False):
-        cmd_str=f'sbatch -N 1 -c 40 -p standard --mem=180G --wrap="python ghg_process.py {rdn_files[_r]} {obs_files[_r]} {loc_files[_r]} {glt_files[_r]} {l1b_bandmask_files[_r]} {l2a_mask_files[_r]} {out_files[_r]}'
+        cmd_str=f'sbatch -N 1 -c 64 -p standard --mem=300G --wrap="python ghg_process.py {rdn_files[_r]} {obs_files[_r]} {loc_files[_r]} {glt_files[_r]} {l1b_bandmask_files[_r]} {l2a_mask_files[_r]} {out_files[_r]}'
 
         if args.co2:
-            cmd_str += ' --co2'
+            cmd_str += ' --co2 --lut_file /store/shared/ghg/dataset_co2_full.hdf5'
 
         if state_files[_r] is not None:
             cmd_str += f' --state_subs {state_files[_r]}"'
