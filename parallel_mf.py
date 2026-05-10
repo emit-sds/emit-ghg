@@ -66,6 +66,7 @@ def main(input_args=None):
     parser.add_argument('--mask_clouds_water',action='store_true', help='mask clouds and water from output matched filter')         
     parser.add_argument('--mask_saturation',action='store_true', help='mask saturated pixels from output matched filter')         
     parser.add_argument('--mask_flares',action='store_true', help='mask flared pixels from output matched filter')         
+    parser.add_argument('--reflectance_mode',action='store_true', help='run as absorption feature subtraction')         
     parser.add_argument('--ppm_scaling', type=float, default=100000.0, help='scaling factor to unit convert outputs - based on target')         
     parser.add_argument('--ace_filter', action='store_true', help='Use the Adaptive Cosine Estimator (ACE) Filter')    
     parser.add_argument('--target_scaling', type=str,choices=['mean','pixel'],default='mean', help='value to scale absorption coefficients by')    
@@ -83,6 +84,10 @@ def main(input_args=None):
     if (args.uncert_output_file is not None and args.sens_output_file is None) or \
        (args.uncert_output_file is None and args.sens_output_file is not None):
         m = 'Both uncert_output_file and sens_output_file must be provided if either is provided. Only one or the other was provided.'
+        raise ValueError(m)
+
+    if (args.reflectance_mode and args.uncert_output_file is not None):
+        m = 'Uncertainty is not yet supported in reflectance mode'
         raise ValueError(m)
 
     if args.uncert_output_file is not None and args.noise_parameters_file is None:
@@ -216,8 +221,10 @@ def main(input_args=None):
 
         # output_retr_dat.shape -> (lines,samples,bands) for apply_badvalue
         output_retr_dat   = output_retr_dat.transpose([1,0,2]) 
-        output_uncert_dat = output_uncert_dat.transpose([1,0,2]) 
-        output_sens_dat   = output_sens_dat.transpose([1,0,2]) 
+        if args.uncert_output_file is not None:
+            output_uncert_dat = output_uncert_dat.transpose([1,0,2]) 
+        if args.sens_output_file is not None:
+            output_sens_dat   = output_sens_dat.transpose([1,0,2]) 
 
         def apply_badvalue(d, mask, bad_data_value):
             d[mask] = bad_data_value 
@@ -226,28 +233,36 @@ def main(input_args=None):
         if args.mask_clouds_water and clouds_and_surface_water_mask is not None:
             logging.info('Masking clouds and water')
             output_retr_dat = apply_badvalue(output_retr_dat, clouds_and_surface_water_mask, args.screen_value) 
-            output_uncert_dat = apply_badvalue(output_uncert_dat, clouds_and_surface_water_mask, args.screen_value) 
-            output_sens_dat = apply_badvalue(output_sens_dat, clouds_and_surface_water_mask, args.screen_value) 
+            if args.uncert_output_file is not None:
+                output_uncert_dat = apply_badvalue(output_uncert_dat, clouds_and_surface_water_mask, args.screen_value) 
+            if args.sens_output_file is not None:
+                output_sens_dat = apply_badvalue(output_sens_dat, clouds_and_surface_water_mask, args.screen_value) 
 
         if args.mask_saturation and saturation is not None:
             logging.info('Masking saturation')
             output_retr_dat = apply_badvalue(output_retr_dat, saturation, args.screen_value) 
-            output_uncert_dat = apply_badvalue(output_uncert_dat, saturation, args.screen_value) 
-            output_sens_dat = apply_badvalue(output_sens_dat, saturation, args.screen_value) 
+            if args.uncert_output_file is not None:
+                output_uncert_dat = apply_badvalue(output_uncert_dat, saturation, args.screen_value) 
+            if args.sens_output_file is not None:
+                output_sens_dat = apply_badvalue(output_sens_dat, saturation, args.screen_value) 
 
         if args.mask_flares and saturation is not None:
             logging.info('Masking saturation')
             output_retr_dat = apply_badvalue(output_retr_dat, dilated_saturation, args.screen_value) 
-            output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_saturation, args.screen_value) 
-            output_sens_dat = apply_badvalue(output_sens_dat, dilated_saturation, args.screen_value) 
             output_retr_dat = apply_badvalue(output_retr_dat, dilated_flare_mask, args.screen_value) 
-            output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_flare_mask, args.screen_value) 
-            output_sens_dat = apply_badvalue(output_sens_dat, dilated_flare_mask, args.screen_value) 
 
+            if args.uncert_output_file is not None:
+                output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_saturation, args.screen_value) 
+                output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_flare_mask, args.screen_value) 
+            if args.sens_output_file is not None:
+                output_sens_dat = apply_badvalue(output_sens_dat, dilated_saturation, args.screen_value) 
+                output_sens_dat = apply_badvalue(output_sens_dat, dilated_flare_mask, args.screen_value) 
         # output_retr_dat.shape -> (lines,bands,samples) for write_bil_chunk
         output_retr_dat = output_retr_dat.transpose(0,2,1) 
-        output_uncert_dat = output_uncert_dat.transpose(0,2,1)
-        output_sens_dat = output_sens_dat.transpose(0,2,1)
+        if args.uncert_output_file is not None:
+            output_uncert_dat = output_uncert_dat.transpose(0,2,1)
+        if args.sens_output_file is not None:
+            output_sens_dat = output_sens_dat.transpose(0,2,1)
 
         write_bil_chunk(output_retr_dat, args.output_file, ce, chunk_shape)
         if args.uncert_output_file is not None:
@@ -490,7 +505,10 @@ def diffmf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask,
             logging.warn('singular matrix. skipping this column')
             continue
         col_mu = np.mean(rdn_col[good_pixel_idx,:], axis=0)
-        tgt_zmw = (absorption_coefficients*col_mu).dot(Cstd)
+        if args.reflectance_mode:
+            tgt_zmw = (absorption_coefficients-col_mu).dot(Cstd)
+        else:
+            tgt_zmw = (absorption_coefficients*col_mu).dot(Cstd)
         col_zmw = (rdn_col[no_radiance_mask,:]-col_mu).dot(Cstd)                
         for d in range(nderiv):
             if d==0: # diffmf(d==0): standard CMF
@@ -504,7 +522,7 @@ def diffmf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask,
             
             # Matched filter
             diffmf_col = dcol_zmw.dot(dtgt_zmw.T) / dtgt_norm
-            diffmf[col, no_radiance_mask, d] = diffmf_col * args.ppm_scaling
+            diffmf[col, no_radiance_mask, d] = diffmf_col if args.reflectance_mode else diffmf_col * args.ppm_scaling
         
             if args.uncert_output_file is not None:
                 ####################################################################################################################

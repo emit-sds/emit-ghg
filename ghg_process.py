@@ -160,12 +160,15 @@ def main(input_args=None):
                    '--n_mc', '1',
                    '--l1b_bandmask_file', args.l1b_bandmask_file,
                    '--l2a_mask_file', args.l2a_mask_file,
-                   '--fixed_alpha', '0.0000000001',
+                   #'--fixed_alpha', '0.0000000001',
+                   '--fixed_alpha', '0.000001',
                    '--mask_clouds_water',
                    '--flare_outfile', files.flare_file,
                    '--noise_parameters_file', args.noise_file,
                    '--sens_output_file', files.mf_sens_file,
-                   '--uncert_output_file', files.mf_uncert_file]
+                   '--uncert_output_file', files.mf_uncert_file,
+                   '--num_diffmf', '3',
+                   ]
 
         if args.wavelength_range is not None:
             subargs.extend(['--wavelength_range'] + [str(val) for val in args.wavelength_range])

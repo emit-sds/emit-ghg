@@ -34,10 +34,12 @@ def main(input_args=None):
 
 
     files = np.genfromtxt(args.filelist, dtype=str)
-    rdn_files = [sorted(glob(f'/beegfs/store/emit/ops/data/acquisitions/{x[4:12]}/{x.split("_")[0]}/l1b/*_rdn_b0106_v01.img'))[-1] for x in files]
+    rdn_files = [sorted(glob(f'/store/emit/ops/data/acquisitions/{x[4:12]}/{x.split("_")[0]}/l1b/*_rdn_b0106_v01.img'))[-1] for x in files]
     obs_files = [x.replace('rdn','obs') for x in rdn_files]
     loc_files = [x.replace('rdn','loc') for x in rdn_files]
     glt_files = [x.replace('rdn','glt') for x in rdn_files]
+    l1b_bandmask_files = [x.replace('rdn','bandmask') for x in rdn_files]
+    l2a_mask_files = [x.replace('l1b','l2a').replace('rdn','mask') for x in rdn_files]
 
     state_files = [x.replace('l1b','l2a').replace('rdn','statesubs') for x in rdn_files]
     state_files = [x if os.path.isfile(x) else None for x in state_files]
@@ -47,12 +49,13 @@ def main(input_args=None):
     for _r in range(len(rdn_files)):
     #for _r in range(10):
 
-        cmd_str=f'sbatch -N 1 -c 40 --mem=180G --wrap="python ghg_process.py {rdn_files[_r]} {obs_files[_r]} {loc_files[_r]} {glt_files[_r]} {out_files[_r]} --co2'
+        cmd_str=f'sbatch -N 1 -c 1 --mem=20G --wrap="python ghg_process.py {rdn_files[_r]} {obs_files[_r]} {loc_files[_r]} {glt_files[_r]} {l1b_bandmask_files[_r]} {l2a_mask_files[_r]} {out_files[_r]}'
         if state_files[_r] is not None:
             cmd_str += f' --state_subs {state_files[_r]}"'
         else:
             cmd_str += f'"'
 
+        print(cmd_str)
         subprocess.call(cmd_str,shell=True)
         time.sleep(0.1)
     
