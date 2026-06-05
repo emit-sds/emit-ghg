@@ -120,7 +120,7 @@ if [ ! -f $doutpath ]; then
 fi
 
 if [ ! -f $drefpath ]; then 
-    echo "Running parallel_diffmf.py with wavelength_range=$wvlrange max_deriv=$max_deriv"
+    echo "Refining parallel_diffmf.py output with wavelength_range=$wvlrange max_deriv=$max_deriv"
     runcmd="python parallel_diffmf.py $rdnpath $tgtpath $drefpath --max_deriv $max_deriv \
        --n_mc 1 --wavelength_range $wvlrange --fixed_alpha $alpha \
        --l1b_bandmask_file $l1bmskf --l2a_mask_file $l2amskf \
