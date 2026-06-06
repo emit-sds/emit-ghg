@@ -30,6 +30,7 @@ def main(input_args=None):
     parser.add_argument('date', type=str,  metavar='DATE', help='path to input image')   
     parser.add_argument('output_dir', type=str,  metavar='OUTPUT', help='path to input image')   
     parser.add_argument('--co2', action='store_true', help='flag to indicate whether to run co2')    
+    parser.add_argument('--cnn_files_only', action='store_true', help='flag to burn intermediate files not used for CNN')    
     args = parser.parse_args(input_args)
 
     if args.date == 'all':
@@ -40,7 +41,7 @@ def main(input_args=None):
     loc_files = [x.replace('rdn','loc') for x in rdn_files]
     glt_files = [x.replace('rdn','glt') for x in rdn_files]
     l1b_bandmask_files = [x.replace('rdn','bandmask') for x in rdn_files]
-    l2a_mask_files = [x.replace('l1b','l2a').replace('rdn','mask') for x in rdn_files]
+    l2a_mask_files = [x.replace('/l1b/','/mask/').replace('l1b_rdn','l2a_mask').replace('_v01.img','_v02.img') for x in rdn_files]
 
     state_files = [x.replace('l1b','l2a').replace('rdn','statesubs') for x in rdn_files]
     state_files = [x if os.path.isfile(x) else None for x in state_files]
@@ -55,13 +56,19 @@ def main(input_args=None):
 
       ch4_mf_kmz_file = f'{out_files[_r]}_ch4_mf_scaled_color_ort.tif'
       co2_mf_kmz_file = f'{out_files[_r]}_co2_mf_scaled_color_ort.tif'
+      ch4_ort_cog = f'{out_files[_r]}_mf_ort.tif'
+      logfile = f'logs/{os.path.basename(out_files[_r])}.log'
 
       launch = os.path.isfile(ch4_mf_kmz_file) is False
-      if os.path.isfile(ch4_mf_kmz_file) is False or (args.co2 and os.path.isfile(co2_mf_kmz_file) is False):
-        cmd_str=f'sbatch -N 1 -c 40 -p standard --mem=180G --wrap="source /tmp/miniconda/bin/activate; conda activate isofit_env; python ghg_process.py {rdn_files[_r]} {obs_files[_r]} {loc_files[_r]} {glt_files[_r]} {l1b_bandmask_files[_r]} {l2a_mask_files[_r]} {out_files[_r]}'
+      #if os.path.isfile(ch4_mf_kmz_file) is False or (args.co2 and os.path.isfile(co2_mf_kmz_file) is False):
+      if os.path.isfile(ch4_ort_cog) is False:
+        cmd_str=f'sbatch -N 1 -c 1 -p standard -o {logfile} -e {logfile} --mem=20G --wrap="python ghg_process.py {rdn_files[_r]} {obs_files[_r]} {loc_files[_r]} {glt_files[_r]} {l1b_bandmask_files[_r]} {l2a_mask_files[_r]} {out_files[_r]} --num_diffmf 3'
 
         if args.co2:
             cmd_str += ' --co2'
+        
+        if args.cnn_files_only:
+            cmd_str += ' --cnn_files_only'
 
         if state_files[_r] is not None:
             cmd_str += f' --state_subs {state_files[_r]}"'

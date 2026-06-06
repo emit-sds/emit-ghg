@@ -88,6 +88,8 @@ def main(input_args=None):
     parser.add_argument('--co2', action='store_true', help='flag to indicate whether to run co2')
     parser.add_argument('--software_version', type=str, default=None)
     parser.add_argument('--product_version', type=str, default=None)
+    parser.add_argument('--cnn_files_only', action='store_true', help='flag to only keep mf_ort.tif')
+    parser.add_argument('--num_diffmf', type=int, default=3, help='Number of DiffMF derivatives')
     args = parser.parse_args(input_args)
 
     if args.wavelength_range is not None and len(args.wavelength_range) % 2 != 0:
@@ -167,7 +169,7 @@ def main(input_args=None):
                    '--noise_parameters_file', args.noise_file,
                    '--sens_output_file', files.mf_sens_file,
                    '--uncert_output_file', files.mf_uncert_file,
-                   '--num_diffmf', '3',
+                   '--num_diffmf', str(args.num_diffmf),
                    ]
 
         if args.wavelength_range is not None:
@@ -188,29 +190,38 @@ def main(input_args=None):
                        metadata[gas]['mf'],
                        args.software_version,
                        args.product_version)
-    # ORT Sensitivity
-    if os.path.isfile(files.sens_ort_file) is False or args.overwrite:
-        apply_glt.main([args.glt_file, files.mf_sens_file, files.sens_ort_file])
-    if os.path.isfile(files.sens_ort_cog) is False or args.overwrite:
-        convert_to_cog(files.sens_ort_file,
-                       files.sens_ort_cog,
-                       metadata[gas]['sens'],
-                       args.software_version,
-                       args.product_version)
-    # ORT Uncertainty
-    if os.path.isfile(files.uncert_ort_file) is False or args.overwrite:
-        apply_glt.main([args.glt_file, files.mf_uncert_file, files.uncert_ort_file])
-    if os.path.isfile(files.uncert_ort_cog) is False or args.overwrite:
-        convert_to_cog(files.uncert_ort_file,
-                       files.uncert_ort_cog,
-                       metadata[gas]['unc'],
-                       args.software_version,
-                       args.product_version)
-    # Quicklook MF
-    if (os.path.isfile(files.mf_ort_ql) is False or args.overwrite) and args.co2:
-        scale.main([files.mf_ort_file, files.mf_ort_ql, '1', '100000', '--cmap', 'viridis'])
-    if os.path.isfile(files.mf_ort_ql) is False or args.overwrite:
-        scale.main([files.mf_ort_file, files.mf_ort_ql, '1', '1000', '--cmap', 'plasma'])
+    
+    if args.cnn_files_only is False:
+        # ORT Sensitivity
+        if os.path.isfile(files.sens_ort_file) is False or args.overwrite:
+            apply_glt.main([args.glt_file, files.mf_sens_file, files.sens_ort_file])
+        if os.path.isfile(files.sens_ort_cog) is False or args.overwrite:
+            convert_to_cog(files.sens_ort_file,
+                           files.sens_ort_cog,
+                           metadata[gas]['sens'],
+                           args.software_version,
+                           args.product_version)
+        # ORT Uncertainty
+        if os.path.isfile(files.uncert_ort_file) is False or args.overwrite:
+            apply_glt.main([args.glt_file, files.mf_uncert_file, files.uncert_ort_file])
+        if os.path.isfile(files.uncert_ort_cog) is False or args.overwrite:
+            convert_to_cog(files.uncert_ort_file,
+                           files.uncert_ort_cog,
+                           metadata[gas]['unc'],
+                           args.software_version,
+                           args.product_version)
+        # Quicklook MF
+        if (os.path.isfile(files.mf_ort_ql) is False or args.overwrite) and args.co2:
+            scale.main([files.mf_ort_file, files.mf_ort_ql, '1', '100000', '--cmap', 'viridis'])
+        if os.path.isfile(files.mf_ort_ql) is False or args.overwrite:
+            scale.main([files.mf_ort_file, files.mf_ort_ql, '1', '1000', '--cmap', 'plasma'])
+    else:
+        # If we're only keeping the CNN files, remove the ort files to save space
+        for f in [files.mf_ort_file, files.sens_ort_file, files.uncert_ort_file, files.target_file, files.flare_file,
+                  files.mf_file, files.mf_sens_file, files.mf_uncert_file]:
+            for ext in ['', '.hdr', '.aux.xml']:
+                if os.path.isfile(f + ext):
+                    os.remove(f + ext)
 
     # Color MF
     # if (os.path.isfile(files.mf_scaled_color_ort_file) is False or args.overwrite) and args.co2:

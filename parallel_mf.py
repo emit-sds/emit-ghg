@@ -203,7 +203,13 @@ def main(input_args=None):
         logging.debug("adding cloud / water mask")
         clouds_and_surface_water_mask = None
         if args.l2a_mask_file is not None:
-            clouds_and_surface_water_mask = np.sum(envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')[ce:chunk_edges[_ce+1],:,:3],axis=-1) > 0
+            mask_ds = envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')
+            # 0 = trad cloud, 1 = trad cirrus, 2 = water, 9 = specTF cloud, 10 = spectf buff
+
+            water_mask = mask_ds[ce:chunk_edges[_ce+1],:,2] > 0
+            cloud_mask = np.logical_and(mask_ds[ce:chunk_edges[_ce+1],:,9] > 0, mask_ds[ce:chunk_edges[_ce+1],:,0])
+
+            clouds_and_surface_water_mask = np.logical_or(water_mask, cloud_mask)
             good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
         
         good_pixel_mask_for_mf = np.ascontiguousarray(good_pixel_mask.T)
