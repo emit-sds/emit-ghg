@@ -21,7 +21,7 @@ import numpy as np
 from osgeo import gdal
 from spectral.io import envi
 
-from utils import write_bil_chunk,envi_header
+from emit_ghg.utils import write_bil_chunk,envi_header
 
 def single_image_ortho(img_dat, in_glt, glt_nodata_value=0):
     """Orthorectify a single image

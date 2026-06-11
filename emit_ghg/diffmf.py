@@ -31,9 +31,9 @@ from scipy.linalg import inv, det, eigh as _eigh
 from scipy.linalg import sqrtm as _sqrtm
 
 import numpy as np
-from utils import envi_header, write_bil_chunk
+from emit_ghg.utils import envi_header, write_bil_chunk
 import json
-from utils import SerialEncoder
+from emit_ghg.utils import SerialEncoder
 
 import logging
 
@@ -53,11 +53,7 @@ def main(input_args=None):
     parser.add_argument('--fg_num_sigma', type=int, default=3, help='number of sigma for foreground mask (1 (default))')
     parser.add_argument('--fg_input_file', type=str,  metavar='INPUT', help='path for diffmf sigma foreground mask input image (binary mask)')        
     parser.add_argument('--fg_output_file', type=str,  metavar='OUTPUT', help='path for diffmf sigma foreground mask output image (binary mask)')
-    parser.add_argument('--n_mc', type=int, default=10, help='number of monte carlo runs')
-    parser.add_argument('--mc_bag_fraction',type=float, default=0.7, help='fraction of data to use in each MC instance')
     parser.add_argument('--wavelength_range', nargs='+', type=float, default=[500, 1340, 1500, 1790, 1950, 2450], help='wavelengths to use: None = default for gas, 2x values = min/max pairs of regions')         
-    parser.add_argument('--remove_dominant_pcs',action='store_true', help='remove dominant PCs from covariance calculation')         
-    parser.add_argument('--subsample_strategy',type=str,choices=['random','spatial_blocks'], help='sampling strategy for mc runs')         
     parser.add_argument('--l1b_bandmask_file',type=str,default=None, help='path to the l1b bandmask file for saturation')         
     parser.add_argument('--l2a_mask_file', type=str,  help='path to l2a mask image for clouds and water')   
     parser.add_argument('--mask_clouds_water',action='store_true', help='mask clouds and water from output matched filter')         
@@ -65,8 +61,6 @@ def main(input_args=None):
     parser.add_argument('--mask_flares',action='store_true', help='mask flared pixels from output matched filter')         
     parser.add_argument('--reflectance_mode',action='store_true', help='run as absorption feature subtraction')         
     parser.add_argument('--ppm_scaling', type=float, default=100000.0, help='scaling factor to unit convert outputs - based on target')         
-    parser.add_argument('--ace_filter', action='store_true', help='Use the Adaptive Cosine Estimator (ACE) Filter')    
-    parser.add_argument('--target_scaling', type=str,choices=['mean','pixel'],default='mean', help='value to scale absorption coefficients by')    
     parser.add_argument('--nodata_value', type=float, default=-9999, help='output nodata value')         
     parser.add_argument('--screen_value', type=float, default=-9999, help='value assigned to screened out pixels')         
     parser.add_argument('--flare_outfile', type=str, default=None, help='output geojson to write flare location centers')         
@@ -75,7 +69,7 @@ def main(input_args=None):
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')         
     parser.add_argument('--uncert_output_file', type=str,  metavar='OUTPUT', help='path for uncertainty output image (mf ch4 ppm)')    
     parser.add_argument('--sens_output_file', type=str,  metavar='OUTPUT', help='path for sensitivity output image (mf ch4 ppm)')    
-    parser.add_argument('--noise_parameters_file', type=str, default=None, help='Mandatory input to produce uncertainty metric. EMIT file found here: https://github.com/isofit/isofit/blob/dev/data/emit_noise.txt')         
+    parser.add_argument('--noise_parameters_file', type=str, default=None, help='Mandatory input to produce uncertainty metric. EMIT file found in data/instrument_noise_parameters/emit_noise.txt')         
     args = parser.parse_args(input_args)
 
     if (args.uncert_output_file is not None and args.sens_output_file is None) or \
@@ -410,21 +404,6 @@ def calculate_mf_covariance(radiance: np.array, model: str, fixed_alpha: float =
         sys.exit(0)
 
     return C
-
-
-def get_mc_subset(mc_iteration: int, args, good_pixel_idx: np.array):
-    if args.n_mc <= 1:
-        cov_subset = good_pixel_idx
-    else:
-        if args.subsample_strategy == 'random':
-            perm = np.random.permutation(len(good_pixel_idx))
-            subset_size = int(args.mc_bag_fraction*len(good_pixel_idx))
-            cov_subset = good_pixel_idx[perm[:subset_size]]
-        elif args.subsample_strategy == 'spatial_blocks':
-            splits = np.linspace(0,float(args.n_mc)-0.001,len(good_pixel_idx)).astype(int)
-            subset_size = np.sum(splits != mc_iteration)
-            cov_subset = good_pixel_idx[splits != mc_iteration]
-    return cov_subset
 
 
 def calculate_saturation_mask(bandmask_file: str, radiance: np.array, dilation_iterations=10, chunk_edges=None):

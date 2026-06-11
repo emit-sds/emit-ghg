@@ -1,0 +1,123 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }} with Python ${{ matrix.python-version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ['3.11', '3.12']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Pixi
+      uses: prefix-dev/setup-pixi@v0.8.1
+      with:
+        pixi-version: latest
+        cache: true
+
+    - name: Install dependencies
+      run: |
+        pixi install -e test
+
+    - name: Verify installation
+      run: |
+        pixi run verify
+
+    - name: Run tests
+      run: |
+        pixi run -e test test
+
+    - name: Run tests with coverage
+      run: |
+        pixi run -e test test-cov
+
+    - name: Check CLI commands
+      run: |
+        pixi run diffmf --help
+        pixi run emit-ghg-process --help
+        pixi run emit-target-gen --help
+        pixi run emit-apply-glt --help
+
+  lint:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Pixi
+      uses: prefix-dev/setup-pixi@v0.8.1
+      with:
+        pixi-version: latest
+        cache: true
+
+    - name: Install dev dependencies
+      run: |
+        pixi install -e dev
+
+    - name: Check formatting with black
+      run: |
+        pixi run -e dev format --check emit_ghg/ deploy/ tests/
+
+    - name: Lint with ruff
+      run: |
+        pixi run -e dev lint
+
+  conda-test:
+    name: Test with Mamba on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Mambaforge
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        miniforge-version: latest
+        miniforge-variant: Mambaforge
+        use-mamba: true
+        python-version: "3.11"
+        channels: conda-forge
+        channel-priority: strict
+        activate-environment: emit-ghg
+
+    - name: Install dependencies
+      shell: bash -el {0}
+      run: |
+        mamba env update -f environment.yml
+
+    - name: Install package
+      shell: bash -el {0}
+      run: |
+        pip install -e ".[test]"
+
+    - name: Verify installation
+      shell: bash -el {0}
+      run: |
+        python -c "from emit_ghg import diffmf; from deploy import ghg_process; print('✓ Installation verified')"
+
+    - name: Run tests
+      shell: bash -el {0}
+      run: |
+        pytest -v
+
+    - name: Check CLI commands
+      shell: bash -el {0}
+      run: |
+        diffmf --help
+        emit-ghg-process --help

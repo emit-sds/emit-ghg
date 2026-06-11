@@ -1,41 +1,86 @@
-<h1 align="center"> emit-ghg </h1>
+# EMIT GHG - Greenhouse Gas Detection
 
-Welcome to the EMIT GHG codebase.  This is research code to support point-source mapping from EMIT, and stands slightly outside of the main SDS - if you're looking for info on the full SDS, please see [the repository guide](https://github.jpl.nasa.gov/emit-sds/emit-main/wiki/Repository-Guide).
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-Please note that this is research code, made available as it is being developed and deployed in the interest of open science and open applications.  In particular, some poor coding practices like hardcoded paths or pre-built dependencies are still in place, though should fade with time.  The main call for a particular scene is:
+Point-source methane and CO2 detection from EMIT hyperspectral imaging data.
+
+## Overview
+
+This codebase implements a classical matched filter applied independently along each pushbroom column (Thompson et al., 2015, 2016; Frankenberg et al., 2016). Signatures are calculated on a scene-specific basis to account for local water vapor, elevation and solar position as in Foote et al. (2020). Statistical control for surface reflectance is used as in Elder et al. (2020).
+
+**Note**: This is research code made available during active development for open science.
+
+## Quick Start
+
+### Installation
+
+**Important**: GDAL must be installed via conda/mamba/pixi (it cannot be installed via pip alone).
+
+#### Option 1: Using Pixi (Recommended)
+
+[Pixi](https://pixi.sh) is a modern package manager that handles both conda and PyPI dependencies.
+
+**Then install EMIT GHG:**
+```bash
+# Install
+pixi install
+
+# Verify installation
+pixi run verify
+
+# Enter the environment
+pixi shell
+```
+
+#### Option 2: Using Mamba
+
+```bash
+# Create environment and install dependencies
+mamba env create -f environment.yml
+conda activate emit-ghg
+
+# Install package in editable mode
+pip install -e .
+```
+
+
+### Basic Usage
+
+Process a single EMIT scene:
+
+```bash
+emit-ghg-process \
+    radiance.img \
+    obs.img \
+    loc.img \
+    glt.img \
+    l1b_bandmask.img \
+    l2a_mask.img \
+    /output/path/scene_id \
+    --state_subs state.img \
+    --loglevel INFO
+```
+
+or directly run diffmf:
 
 ```
-python ghg_process.py 
-       radiance_file
-       obs_file
-       loc_file
-       glt_file
-       l1b_bandmask_file
-       l2a_mask_file
-       output_base
-       --state_subs  
-       --loglevel
-       --logfile
+diffmf --help
 ```
 
-This will generate both ch4 and co2 matched filter results, along with some scaling and visualization products to accomany each. 
+### Running Tests
 
-This code uses a classical matched filter applied independently along each pushbroom column (Thompson et al., 2015, 2016; Frankenberg et al., 2016).  Signatures are calculated on a scene-specific basis to account for local water vapor, elevation and solar position as in Foote et al. (2020). Statistical control for surface reflectance is used as in Elder et al. (2020).  
+```bash
+pytest
+pytest --cov=emit_ghg
+```
 
-Relevent references include, but are not limited to:
+## References
 
-Thompson, D. R., Leifer, I., Bovensmann, H., Eastwood, M., Fladeland, M., Frankenberg, C., Gerilowski, K., Green, R.O., Kratwurst, S., Krings, T. and Luna, B., (2015). Real-time remote detection and measurement for airborne imaging spectroscopy: a case study with methane. Atmospheric Measurement Techniques, 8(10), pp.4383-4397.
-
-Frankenberg, C., Thorpe, A.K., Thompson, D.R., Hulley, G., Kort, E.A., Vance, N., Borchardt, J., Krings, T., Gerilowski, K., Sweeney, C. and Conley, S., (2016). Airborne methane remote measurements reveal heavy-tail flux distribution in Four Corners region. Proceedings of the national academy of sciences, 113(35), pp.9734-9739.
-
-Thompson, D.R., Thorpe, A.K., Frankenberg, C., Green, R.O., Duren, R., Guanter, L., Hollstein, A., Middleton, E., Ong, L. and Ungar, S., (2016). Space‐based remote imaging spectroscopy of the Aliso Canyon CH4 superemitter. Geophysical Research Letters, 43(12), pp.6571-6578.
-
-Foote, M.D., Dennison, P.E., Thorpe, A.K., Thompson, D.R., Jongaramrungruang, S., Frankenberg, C. and Joshi, S.C., (2020). Fast and accurate retrieval of methane concentration from imaging spectrometer data using sparsity prior. IEEE Transactions on Geoscience and Remote Sensing, 58(9), pp.6480-6492.
-
-Elder, C. D., Thompson, D. R., Thorpe, A. K., Hanke, P., Walter Anthony, K. M., & Miller, C. E. (2020). Airborne mapping reveals emergent power law of arctic methane emissions. Geophysical Research Letters, 47(3), e2019GL085707.
-
-Thorpe, A. K., Duren, R. M., Conley, S., Prasad, K. R., Bue, B. D., Yadav, V., ... & Miller, C. E. (2020). Methane emissions from underground gas storage in California. Environmental Research Letters, 15(4), 045005.
-
-
+- Thompson, D. R., et al. (2015). Real-time remote detection and measurement for airborne imaging spectroscopy: a case study with methane. *Atmospheric Measurement Techniques*, 8(10), 4383-4397.
+- Frankenberg, C., et al. (2016). Airborne methane remote measurements reveal heavy-tail flux distribution in Four Corners region. *PNAS*, 113(35), 9734-9739.
+- Thompson, D.R., et al. (2016). Space‐based remote imaging spectroscopy of the Aliso Canyon CH4 superemitter. *Geophysical Research Letters*, 43(12), 6571-6578.
+- Foote, M.D., et al. (2020). Fast and accurate retrieval of methane concentration from imaging spectrometer data using sparsity prior. *IEEE TGRS*, 58(9), 6480-6492.
+- Elder, C. D., et al. (2020). Airborne mapping reveals emergent power law of arctic methane emissions. *Geophysical Research Letters*, 47(3), e2019GL085707.
+- Thorpe, A. K. et al. (2024). Attribution of individual methane and carbon dioxide emission sources using EMIT observations from space. *Science Advances*, 46(9), eadh2391.
 
 
