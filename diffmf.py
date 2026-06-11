@@ -24,13 +24,11 @@ import argparse
 from spectral.io import envi
 
 import sys
-import scipy.linalg
 import scipy.ndimage
 import scipy.interpolate
 
 from scipy.linalg import inv, det, eigh as _eigh
 from scipy.linalg import sqrtm as _sqrtm
-from scipy.linalg import cholesky as _cholesky 
 
 import numpy as np
 from utils import envi_header, write_bil_chunk
@@ -38,10 +36,6 @@ import json
 from utils import SerialEncoder
 
 import logging
-import os
-
-#import torch
-#from torch.linalg import eigh as _teigh
 
 from scipy.signal import savgol_filter
 
@@ -55,7 +49,10 @@ def main(input_args=None):
     parser.add_argument('--covariance_style', type=str, default='looshrinkage', choices=['empirical', 'looshrinkage'], help='style of covariance estimation') 
     parser.add_argument('--fixed_alpha', type=float, default=None, help='fixed value for shrinkage (with looshrinkage covariance style only)')    
     parser.add_argument('--num_cores', type=int, default=-1, help='number of cores (-1 (default))')
-    parser.add_argument('--num_diffmf', type=int, default=1, help='number of diffmf derivatives (1 (default))')
+    parser.add_argument('--max_deriv', type=int, default=2, help='maximum order of diffmf derivatives (2 (default))')
+    parser.add_argument('--fg_num_sigma', type=int, default=3, help='number of sigma for foreground mask (1 (default))')
+    parser.add_argument('--fg_input_file', type=str,  metavar='INPUT', help='path for diffmf sigma foreground mask input image (binary mask)')        
+    parser.add_argument('--fg_output_file', type=str,  metavar='OUTPUT', help='path for diffmf sigma foreground mask output image (binary mask)')
     parser.add_argument('--n_mc', type=int, default=10, help='number of monte carlo runs')
     parser.add_argument('--mc_bag_fraction',type=float, default=0.7, help='fraction of data to use in each MC instance')
     parser.add_argument('--wavelength_range', nargs='+', type=float, default=[500, 1340, 1500, 1790, 1950, 2450], help='wavelengths to use: None = default for gas, 2x values = min/max pairs of regions')         
@@ -146,7 +143,7 @@ def main(input_args=None):
     logging.info('Create output file, initialized with nodata')
     outmeta = ds.metadata
     outmeta['data type'] = np2envitype(np.float32)
-    outmeta['bands'] = 3
+    outmeta['bands'] = args.max_deriv+1
     outmeta['description'] = 'Differential Matched Filter Results'
     outmeta['band names'] = 'Differential Matched Filter'
     outmeta['interleave'] = 'bil'    
@@ -313,6 +310,16 @@ def write_hotspot_vector(output_file, flares, saturation):
 
 
 def fit_looshrinkage_alpha(data, alphas, I_reg=[]):
+    """Fit the best shrinkage parameter via Theiler et al.
+
+    Args:
+        data (np.array): data to estimate covariance matrix from
+        alphas (list): possible shrinkage parameters
+        I_reg (list, optional):  Defaults to [].
+
+    Returns:
+        (np.array): covariance matrix
+    """
     # loocv shrinkage estimation via Theiler et al.
     stability_scaling=100.0 
     nchan = data.shape[1]
@@ -385,6 +392,7 @@ def calculate_mf_covariance(radiance: np.array, model: str, fixed_alpha: float =
 
     Args:
         radiance (np.array): radiance data
+        model (str): 
 
     Returns:
         tuple: (covariance, mean)
@@ -483,7 +491,9 @@ def diffmf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask,
     ncross, nalong, nspec = rdn_subset.shape
     print(rdn_subset.shape)
 
-    nderiv = args.num_diffmf
+    max_deriv = args.max_deriv
+    derivs = np.arange(0,max_deriv+1)
+    nderiv = len(derivs)
     
     diffmf = np.ones((ncross, nalong, nderiv)) * args.nodata_value
     uncert = np.ones((ncross, nalong, nderiv)) * args.nodata_value
@@ -516,7 +526,7 @@ def diffmf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask,
         else:
             tgt_zmw = (absorption_coefficients*col_mu).dot(Cstd)
         col_zmw = (rdn_col[no_radiance_mask,:]-col_mu).dot(Cstd)                
-        for d in range(nderiv):
+        for d in derivs:
             if d==0: # diffmf(d==0): standard CMF
                 dcol_zmw = col_zmw
                 dtgt_zmw = tgt_zmw
@@ -567,6 +577,22 @@ def diffmf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask,
         sens = None
 
     return diffmf.astype(np.float32), uncert, sens
+
+def mad(a,medval=None):
+    medval = medval or np.median(a)
+    return np.median(np.abs(a-medval))
+
+def diffmf_nsigma_mask(diffmf,args):
+    valid_mask = np.logical_and(diffmf!=args.nodata_value, np.isfinite(diffmf)).all(axis=2)
+    cmf_bgmed = np.median(diffmf[valid_mask,0])
+    cmf_bgmad = args.fg_num_sigma * mad(diffmf[valid_mask,0],medval=cmf_bgmed)
+    cmf_bgmax = cmf_bgmed + cmf_bgmad
+    print(f'bgmed: {cmf_bgmed}, bgmad: {cmf_bgmad}, bgmax: {cmf_bgmax}')
+    diffmf_fgmask = np.logical_and(valid_mask,(diffmf>=cmf_bgmax).all(axis=2))
+    print(f'valid_mask.sum(): {valid_mask.sum()}, diffmf_fgmask.sum(): {diffmf_fgmask.sum()}')
+    return diffmf_fgmask
+
+
 
 if __name__ == '__main__':
     main()
