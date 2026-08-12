@@ -26,6 +26,8 @@ dependencies = [
     "scipy",
     "h5py",
     "spectral>=0.23.1",
+    "matplotlib",
+    "pillow",
 ]
 
 [project.optional-dependencies]
@@ -51,6 +53,7 @@ emit-ghg-plumeid = "emit_ghg.cli:plumeid_cli"
 diffmf = "emit_ghg.diffmf:main"
 emit-target-gen = "emit_ghg.target_generation:main"
 emit-apply-glt = "emit_ghg.apply_glt:main"
+emit-scale = "emit_ghg.scale:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -93,6 +96,8 @@ h5py = "*"
 [tool.pixi.pypi-dependencies]
 emit-ghg = { path = ".", editable = true }
 spectral = ">=0.23.1"
+matplotlib = "*"
+pillow = "*"
 
 [tool.pixi.feature.test.dependencies]
 pytest = ">=7.0"
