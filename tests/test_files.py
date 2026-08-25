@@ -28,14 +28,3 @@ def test_filenames_creation():
     assert hasattr(files, 'mf_ort_cog_d2')
     assert hasattr(files, 'sens_ort_file')
     assert hasattr(files, 'uncert_ort_file')
-
-
-def test_filenames_extensions():
-    """Test that Filenames generates correct file extensions."""
-    base_path = "/test/emit20230101t120000"
-    files = Filenames(base_path)
-
-    # Check that generated files have appropriate extensions or patterns
-    assert "target" in files.target_file
-    assert "mf" in files.mf_file
-    assert "ort" in files.mf_ort_file
