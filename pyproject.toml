@@ -25,6 +25,7 @@ dependencies = [
     "numpy>=2.0",
     "scipy",
     "h5py",
+    "netCDF4",
     "spectral>=0.23.1",
     "matplotlib",
     "pillow",
@@ -92,6 +93,7 @@ gdal = "*"
 numpy = ">=2.0"
 scipy = "*"
 h5py = "*"
+netcdf4 = ">=1.7.4,<2"
 
 [tool.pixi.pypi-dependencies]
 emit-ghg = { path = ".", editable = true }
