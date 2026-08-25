@@ -32,10 +32,12 @@ from scipy.linalg import sqrtm as _sqrtm
 
 import numpy as np
 from emit_ghg.utils import envi_header, write_bil_chunk
+from emit_ghg import ncio
 import json
 from emit_ghg.utils import SerialEncoder
 
 import logging
+import os
 
 from scipy.signal import savgol_filter
 
@@ -89,13 +91,26 @@ def main(input_args=None):
     #Set up logging
     logging.basicConfig(format='%(levelname)s:%(asctime)s ||| %(message)s', level=args.loglevel,
                         filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
-   
+
     logging.info('Started processing input file: "%s"'%str(args.radiance_file))
-    ds = envi.open(envi_header(args.radiance_file),image=args.radiance_file)
-    if 'wavelength' not in ds.metadata:
-        logging.error('wavelength field not found in input header')
-        sys.exit(0)
-    wavelengths = np.array([float(x) for x in ds.metadata['wavelength']])
+
+    is_netcdf = args.radiance_file.endswith('.nc')
+
+    if args.chunksize is not None and is_netcdf:
+        logging.warning('Out-of core disk utilization is not supported for .nc files - this operation' \
+        'may be memory intensive.')
+
+    if is_netcdf:
+        nc_meta, nc_radiance = ncio.open_netcdf_radiance(args.radiance_file)
+        wavelengths = nc_meta.wavelengths
+        ds = None
+    else:
+        ds = envi.open(envi_header(args.radiance_file),image=args.radiance_file)
+        if 'wavelength' not in ds.metadata:
+            logging.error('wavelength field not found in input header')
+            sys.exit(0)
+        wavelengths = np.array([float(x) for x in ds.metadata['wavelength']])
+        nc_radiance = None
 
     if args.wavelength_range is None:
         if 'ch4' in args.library:
@@ -139,16 +154,23 @@ def main(input_args=None):
         band_names += [f'Differential Matched Filter Derivative {n}']
 
     logging.info('Create output file, initialized with nodata')
-    outmeta = ds.metadata
+    if is_netcdf:
+        outmeta = {}
+        outmeta['lines'] = nc_radiance.shape[0]
+        outmeta['samples'] = nc_radiance.shape[2]
+        outmeta['bands'] = args.max_deriv+1
+    else:
+        # assumed envi file
+        for kwarg in ['smoothing factors','wavelength','wavelength units','fwhm']:
+            outmeta.pop(kwarg,None)
+
+    # Now the common field updates
     outmeta['data type'] = np2envitype(np.float32)
-    outmeta['bands'] = args.max_deriv+1
     outmeta['description'] = 'Differential Matched Filter Results'
     outmeta['band names'] = band_names
-    outmeta['interleave'] = 'bil'    
-    outmeta['z plot range'] = '{0, 1500}' #adapt to include co2
+    outmeta['interleave'] = 'bil'
+    outmeta['z plot range'] = '{0, 1500}'
     outmeta['data ignore value'] = args.nodata_value
-    for kwarg in ['smoothing factors','wavelength','wavelength units','fwhm']:
-        outmeta.pop(kwarg,None)
 
     output_ds = envi.create_image(envi_header(args.output_file),outmeta,force=True,ext='')
     del output_ds
@@ -172,9 +194,12 @@ def main(input_args=None):
         chunk_edges.append(output_shape[0])
 
     for _ce, ce in enumerate(chunk_edges[:-1]):
-        
+
         logging.info(f"load radiance for chunk {_ce +1} / {len(chunk_edges) - 1}")
-        radiance = np.ascontiguousarray(ds.open_memmap(interleave='bil',writeable=False)[ce:chunk_edges[_ce+1],...].copy())
+        if is_netcdf:
+            radiance = np.ascontiguousarray(nc_radiance[ce:chunk_edges[_ce+1],...])
+        else:
+            radiance = np.ascontiguousarray(ds.open_memmap(interleave='bil',writeable=False)[ce:chunk_edges[_ce+1],...].copy())
         rad_for_mf = np.float64(radiance[:,active_wl_idx,:])
         rad_for_mf = np.ascontiguousarray(rad_for_mf.transpose([2,0,1]))
         chunk_shape = (chunk_edges[_ce+1] - ce, output_shape[1], output_shape[2])
