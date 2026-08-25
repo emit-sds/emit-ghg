@@ -134,12 +134,16 @@ def main(input_args=None):
     library_reference = np.float64(np.loadtxt(args.library))
     absorption_coefficients = library_reference[active_wl_idx,2]
 
+    band_names = ['Matched Filter']
+    for n in range(1,args.max_deriv + 1):
+        band_names += [f'Differential Matched Filter Derivative {n}']
+
     logging.info('Create output file, initialized with nodata')
     outmeta = ds.metadata
     outmeta['data type'] = np2envitype(np.float32)
     outmeta['bands'] = args.max_deriv+1
     outmeta['description'] = 'Differential Matched Filter Results'
-    outmeta['band names'] = 'Differential Matched Filter'
+    outmeta['band names'] = band_names
     outmeta['interleave'] = 'bil'    
     outmeta['z plot range'] = '{0, 1500}' #adapt to include co2
     outmeta['data ignore value'] = args.nodata_value
