@@ -89,7 +89,7 @@ def main(input_args=None):
     parser.add_argument('--software_version', type=str, default=None)
     parser.add_argument('--product_version', type=str, default=None)
     parser.add_argument('--cnn_files_only', action='store_true', help='flag to only keep mf_ort.tif')
-    parser.add_argument('--num_diffmf', type=int, default=3, help='Number of DiffMF derivatives')
+    parser.add_argument('--max_deriv', type=int, default=2, help='Number of DiffMF derivatives')
     args = parser.parse_args(input_args)
 
     if args.wavelength_range is not None and len(args.wavelength_range) % 2 != 0:
@@ -161,17 +161,16 @@ def main(input_args=None):
         subargs = [args.radiance_file,
                    files.target_file,
                    files.mf_file,
-                   '--n_mc', '1',
                    '--l1b_bandmask_file', args.l1b_bandmask_file,
                    '--l2a_mask_file', args.l2a_mask_file,
-                   #'--fixed_alpha', '0.0000000001',
-                   '--fixed_alpha', '0.000001',
+                   '--fixed_alpha', '0.0000000001',
+                   #'--fixed_alpha', '0.000001',
                    '--mask_clouds_water',
                    '--flare_outfile', files.flare_file,
                    '--noise_parameters_file', args.noise_file,
                    '--sens_output_file', files.mf_sens_file,
                    '--uncert_output_file', files.mf_uncert_file,
-                   '--num_diffmf', str(args.num_diffmf),
+                   '--max_deriv', str(args.max_deriv),
                    ]
 
         if args.wavelength_range is not None:
@@ -187,11 +186,16 @@ def main(input_args=None):
     # ORT MF
     if (os.path.isfile(files.mf_ort_file) is False or args.overwrite):
         apply_glt.main([args.glt_file, files.mf_file, files.mf_ort_file])
-        convert_to_cog(files.mf_ort_file,
-                       files.mf_ort_cog,
-                       metadata[gas]['mf'],
-                       args.software_version,
-                       args.product_version)
+
+    # COG MF
+    for n, cname in zip(range(args.max_deriv), [files.mf_ort_cog, files.mf_ort_cog_d1, files.mf_ort_cog_d2]):
+        if os.path.isfile(cname) is False: 
+            convert_to_cog(files.mf_ort_file,
+                           cname,
+                           metadata[gas]['mf'],
+                           args.software_version,
+                           args.product_version,
+                           band_i=n+1)
     
     if args.cnn_files_only is False:
         # ORT Sensitivity

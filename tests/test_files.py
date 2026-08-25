@@ -24,6 +24,8 @@ def test_filenames_creation():
     assert hasattr(files, 'flare_file')
     assert hasattr(files, 'mf_ort_file')
     assert hasattr(files, 'mf_ort_cog')
+    assert hasattr(files, 'mf_ort_cog_d1')
+    assert hasattr(files, 'mf_ort_cog_d2')
     assert hasattr(files, 'sens_ort_file')
     assert hasattr(files, 'uncert_ort_file')
 

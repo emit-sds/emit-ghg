@@ -10,12 +10,14 @@ dependencies:
   - gdal
 
   # Scientific Computing (all available via conda)
-  - numpy
+  - numpy>=2.0
   - scipy
   - h5py
   - pytest
+  - netcdf4
 
   # Python packages via pip
   - pip:
       - spectral  # Hyperspectral image processing
+      - argparse
 

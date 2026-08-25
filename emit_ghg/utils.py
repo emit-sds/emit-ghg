@@ -78,7 +78,7 @@ class SerialEncoder(json.JSONEncoder):
         else:
             return super(SerialEncoder, self).default(obj)
 
-def convert_to_cog(input_file, output_file,product_metadata,software_build_version,product_version):
+def convert_to_cog(input_file, output_file, product_metadata, software_build_version, product_version, band_i=None):
 
     metadata = {}
     metadata['keywords'] = "Imaging Spectroscopy, minerals, EMIT, dust, radiative forcing"
@@ -105,7 +105,11 @@ def convert_to_cog(input_file, output_file,product_metadata,software_build_versi
 
     metadata['description'] = product_metadata['description']
 
-    ds_mem = gdal.Translate('', input_file, format='MEM')
+    if band_i == None:
+        ds_mem = gdal.Translate('', input_file, format='MEM')
+        band_i = 1
+    else:
+        ds_mem = gdal.Translate('', input_file, format='MEM', bandList=[band_i]) 
     ds_mem.SetMetadata(metadata)
 
     band = ds_mem.GetRasterBand(1)

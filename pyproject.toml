@@ -22,7 +22,7 @@ classifiers = [
 ]
 
 dependencies = [
-    "numpy",
+    "numpy>=2.0",
     "scipy",
     "h5py",
     "spectral>=0.23.1",
@@ -89,7 +89,7 @@ platforms = ["linux-64", "osx-64", "osx-arm64"]
 [tool.pixi.dependencies]
 python = ">=3.11"
 gdal = "*"
-numpy = "*"
+numpy = ">=2.0"
 scipy = "*"
 h5py = "*"
 
