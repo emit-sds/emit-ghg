@@ -21,6 +21,7 @@
 # Authors: Red Willow Coleman
 
 import argparse
+from copy import deepcopy
 from spectral.io import envi
 
 import sys
@@ -159,7 +160,6 @@ def main(input_args=None):
         outmeta = {}
         outmeta['lines'] = nc_radiance.shape[0]
         outmeta['samples'] = nc_radiance.shape[2]
-        outmeta['bands'] = args.max_deriv+1
     else:
         # assumed envi file
         outmeta = ds.metadata
@@ -167,6 +167,7 @@ def main(input_args=None):
             outmeta.pop(kwarg,None)
 
     # Now the common field updates
+    outmeta['bands'] = args.max_deriv+1
     outmeta['data type'] = np2envitype(np.float32)
     outmeta['description'] = 'Differential Matched Filter Results'
     outmeta['band names'] = band_names
@@ -180,11 +181,15 @@ def main(input_args=None):
     write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.output_file, 0, output_shape)
 
     if args.uncert_output_file is not None:
-        output_ds = envi.create_image(envi_header(args.uncert_output_file),outmeta,force=True,ext='')
+        outmeta_uncert = deepcopy(outmeta)
+        outmeta_uncert['band names'] = ['Matched Filter Uncertainty', 'Matched Filter Derivative 1 Uncertainty', 'Matched Filter Derivative 2 Uncertainty']
+        output_ds = envi.create_image(envi_header(args.uncert_output_file),outmeta_uncert,force=True,ext='')
         del output_ds
         write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.uncert_output_file, 0, output_shape)
     if args.sens_output_file is not None:
-        output_ds = envi.create_image(envi_header(args.sens_output_file),outmeta,force=True,ext='')
+        outmeta_sens = deepcopy(outmeta)
+        outmeta_sens['band names'] = ['Matched Filter Sensitivity', 'Matched Filter Derivative 1 Sensitivity', 'Matched Filter Derivative 2 Sensitivity']
+        output_ds = envi.create_image(envi_header(args.sens_output_file),outmeta_sens,force=True,ext='')
         del output_ds
         write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.sens_output_file, 0, output_shape)
 

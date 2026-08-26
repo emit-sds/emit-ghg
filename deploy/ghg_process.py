@@ -188,7 +188,7 @@ def main(input_args=None):
         apply_glt.main([args.glt_file, files.mf_file, files.mf_ort_file])
 
     # COG MF
-    for n, cname in zip(range(args.max_deriv), [files.mf_ort_cog, files.mf_ort_cog_d1, files.mf_ort_cog_d2]):
+    for n, cname in zip(range(args.max_deriv + 1), [files.mf_ort_cog, files.mf_ort_cog_d1, files.mf_ort_cog_d2]):
         if os.path.isfile(cname) is False: 
             convert_to_cog(files.mf_ort_file,
                            cname,
@@ -206,7 +206,8 @@ def main(input_args=None):
                            files.sens_ort_cog,
                            metadata[gas]['sens'],
                            args.software_version,
-                           args.product_version)
+                           args.product_version,
+                           band_i=1) # Only delivering first band, only vetted output
         # ORT Uncertainty
         if os.path.isfile(files.uncert_ort_file) is False or args.overwrite:
             apply_glt.main([args.glt_file, files.mf_uncert_file, files.uncert_ort_file])
@@ -215,7 +216,8 @@ def main(input_args=None):
                            files.uncert_ort_cog,
                            metadata[gas]['unc'],
                            args.software_version,
-                           args.product_version)
+                           args.product_version,
+                           band_i=1) # Only delivering first band, only vetted output
         # Quicklook MF
         if (os.path.isfile(files.mf_ort_ql) is False or args.overwrite) and args.co2:
             scale.main([files.mf_ort_file, files.mf_ort_ql, '1', '100000', '--cmap', 'viridis'])
