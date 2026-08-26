@@ -123,6 +123,8 @@ def spline_5deg_lookup(grid_data, zenith=0, sensor=120, ground=0, water=0, conc=
     #     im, coordinates=coords, order=order, mode='nearest') for im in np.moveaxis(grid_data, 5, 0)])
     if order == 1:
         coords_fractional_part, coords_whole_part = np.modf(coords)
+        # numpy 2.x, coords_whole_part may have shape (5, 1) instead of (5,) in 1.x
+        coords_whole_part = coords_whole_part.squeeze()
         coords_near_slice = tuple((slice(int(c), int(c+2)) for c in coords_whole_part))
         near_grid_data = grid_data[coords_near_slice]
         new_coord = np.concatenate((coords_fractional_part * np.ones((1, near_grid_data.shape[-1])),

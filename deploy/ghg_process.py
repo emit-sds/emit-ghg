@@ -20,14 +20,14 @@ import argparse
 import logging
 import os
 
-import target_generation
-import parallel_mf
-import scale
-import apply_glt
+from emit_ghg import target_generation
+from emit_ghg import diffmf
+from emit_ghg import apply_glt
+from emit_ghg import scale
+from emit_ghg.utils import envi_header, convert_to_cog
+from emit_ghg.files import Filenames
 from spectral.io import envi
 import numpy as np
-from utils import envi_header, convert_to_cog
-from files import Filenames
 
 metadata = {
     'ch4': {
@@ -82,12 +82,14 @@ def main(input_args=None):
     parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')
     parser.add_argument('--mask_flares', type=int, default=1, help='mask flares in output')
     parser.add_argument('--lut_file', type=str, default='/store/shared/ghg/dataset_ch4_full.hdf5')
-    parser.add_argument('--noise_file', type=str, default='instrument_noise_parameters/emit_noise.txt')
+    parser.add_argument('--noise_file', type=str, default=None)
     parser.add_argument('--wavelength_range', nargs='+', type=float, default=[500, 1340, 1500, 1790, 1950, 2450],
                         help='wavelengths to use: None = default for gas, 2x values = min/max pairs of regions')
     parser.add_argument('--co2', action='store_true', help='flag to indicate whether to run co2')
     parser.add_argument('--software_version', type=str, default=None)
     parser.add_argument('--product_version', type=str, default=None)
+    parser.add_argument('--cnn_files_only', action='store_true', help='flag to only keep mf_ort.tif')
+    parser.add_argument('--max_deriv', type=int, default=2, help='Number of DiffMF derivatives')
     args = parser.parse_args(input_args)
 
     if args.wavelength_range is not None and len(args.wavelength_range) % 2 != 0:
@@ -105,14 +107,16 @@ def main(input_args=None):
     logging.basicConfig(format='%(levelname)s:%(asctime)s ||| %(message)s', level=args.loglevel,
                         filename=args.logfile, datefmt='%Y-%m-%d,%H:%M:%S')
 
+    logging.info(f'python ghg_process.py {args.radiance_file} {args.obs_file} {args.loc_file} {args.glt_file} {args.l1b_bandmask_file} {args.l2a_mask_file} {args.output_base}' + 
+                 f' --state_subs {args.state_subs} --overwrite {args.overwrite} --ace_filter {args.ace_filter} --loglevel {args.loglevel} --logfile {args.logfile}'
+                 f' --mask_flares {args.mask_flares} --lut_file {args.lut_file} --noise_file {args.noise_file} '
+                 f' --wavelength_range {" ".join([str(val) for val in args.wavelength_range]) if args.wavelength_range is not None else None} --co2 {args.co2} '
+                 f' --software_version {args.software_version} --product_version {args.product_version} --cnn_files_only {args.cnn_files_only}')
+
     files = Filenames(args.output_base)
 
-    # if os.path.isfile(files.mf_file):
-    #     dat = gdal.Open(files.mf_file).ReadAsArray()
-        #if np.all(dat == -9999):
-        #    subprocess.call(f'rm {args.output_base}_ch4*',shell=True)
 
-    print(files.target_file)
+
 
     if os.path.isfile(files.target_file) is False or args.overwrite:
         sza = envi.open(obs_file_hdr).open_memmap(interleave='bip')[...,4]
@@ -157,15 +161,17 @@ def main(input_args=None):
         subargs = [args.radiance_file,
                    files.target_file,
                    files.mf_file,
-                   '--n_mc', '1',
                    '--l1b_bandmask_file', args.l1b_bandmask_file,
                    '--l2a_mask_file', args.l2a_mask_file,
                    '--fixed_alpha', '0.0000000001',
+                   #'--fixed_alpha', '0.000001',
                    '--mask_clouds_water',
                    '--flare_outfile', files.flare_file,
                    '--noise_parameters_file', args.noise_file,
                    '--sens_output_file', files.mf_sens_file,
-                   '--uncert_output_file', files.mf_uncert_file]
+                   '--uncert_output_file', files.mf_uncert_file,
+                   '--max_deriv', str(args.max_deriv),
+                   ]
 
         if args.wavelength_range is not None:
             subargs.extend(['--wavelength_range'] + [str(val) for val in args.wavelength_range])
@@ -175,55 +181,69 @@ def main(input_args=None):
 
         if args.ace_filter:
             subargs.append('--use_ace_filter')
-        parallel_mf.main(subargs)
+        diffmf.main(subargs)
 
     # ORT MF
     if (os.path.isfile(files.mf_ort_file) is False or args.overwrite):
         apply_glt.main([args.glt_file, files.mf_file, files.mf_ort_file])
-        convert_to_cog(files.mf_ort_file,
-                       files.mf_ort_cog,
-                       metadata[gas]['mf'],
-                       args.software_version,
-                       args.product_version)
-    # ORT Sensitivity
-    if os.path.isfile(files.sens_ort_file) is False or args.overwrite:
-        apply_glt.main([args.glt_file, files.mf_sens_file, files.sens_ort_file])
-    if os.path.isfile(files.sens_ort_cog) is False or args.overwrite:
-        convert_to_cog(files.sens_ort_file,
-                       files.sens_ort_cog,
-                       metadata[gas]['sens'],
-                       args.software_version,
-                       args.product_version)
-    # ORT Uncertainty
-    if os.path.isfile(files.uncert_ort_file) is False or args.overwrite:
-        apply_glt.main([args.glt_file, files.mf_uncert_file, files.uncert_ort_file])
-    if os.path.isfile(files.uncert_ort_cog) is False or args.overwrite:
-        convert_to_cog(files.uncert_ort_file,
-                       files.uncert_ort_cog,
-                       metadata[gas]['unc'],
-                       args.software_version,
-                       args.product_version)
-    # Quicklook MF
-    if (os.path.isfile(files.mf_ort_ql) is False or args.overwrite) and args.co2:
-        scale.main([files.mf_ort_file, files.mf_ort_ql, '1', '100000', '--cmap', 'viridis'])
-    if os.path.isfile(files.mf_ort_ql) is False or args.overwrite:
-        scale.main([files.mf_ort_file, files.mf_ort_ql, '1', '1000', '--cmap', 'plasma'])
 
-    # Color MF
-    # if (os.path.isfile(files.mf_scaled_color_ort_file) is False or args.overwrite) and args.co2:
-    #     scale.main([files.mf_ort_file, files.mf_scaled_color_ort_file, '1', '100000', '--cmap', 'viridis'])
-    # if os.path.isfile(files.mf_scaled_color_ort_file) is False or args.overwrite:
-    #     scale.main([files.mf_ort_file, files.mf_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
+    # COG MF
+    for n, cname in zip(range(args.max_deriv), [files.mf_ort_cog, files.mf_ort_cog_d1, files.mf_ort_cog_d2]):
+        if os.path.isfile(cname) is False: 
+            convert_to_cog(files.mf_ort_file,
+                           cname,
+                           metadata[gas]['mf'],
+                           args.software_version,
+                           args.product_version,
+                           band_i=n+1)
+    
+    if args.cnn_files_only is False:
+        # ORT Sensitivity
+        if os.path.isfile(files.sens_ort_file) is False or args.overwrite:
+            apply_glt.main([args.glt_file, files.mf_sens_file, files.sens_ort_file])
+        if os.path.isfile(files.sens_ort_cog) is False or args.overwrite:
+            convert_to_cog(files.sens_ort_file,
+                           files.sens_ort_cog,
+                           metadata[gas]['sens'],
+                           args.software_version,
+                           args.product_version)
+        # ORT Uncertainty
+        if os.path.isfile(files.uncert_ort_file) is False or args.overwrite:
+            apply_glt.main([args.glt_file, files.mf_uncert_file, files.uncert_ort_file])
+        if os.path.isfile(files.uncert_ort_cog) is False or args.overwrite:
+            convert_to_cog(files.uncert_ort_file,
+                           files.uncert_ort_cog,
+                           metadata[gas]['unc'],
+                           args.software_version,
+                           args.product_version)
+        # Quicklook MF
+        if (os.path.isfile(files.mf_ort_ql) is False or args.overwrite) and args.co2:
+            scale.main([files.mf_ort_file, files.mf_ort_ql, '1', '100000', '--cmap', 'viridis'])
+        if os.path.isfile(files.mf_ort_ql) is False or args.overwrite:
+            scale.main([files.mf_ort_file, files.mf_ort_ql, '1', '1000', '--cmap', 'plasma'])
 
-    # # Color Sensitivity (same for co2 and ch4)
-    # if os.path.isfile(files.sens_scaled_color_ort_file) is False or args.overwrite:
-    #     scale.main([files.sens_ort_file, files.sens_scaled_color_ort_file, '0', '2', '--cmap', 'RdBu_r'])
+        # Color MF
+        if (os.path.isfile(files.mf_scaled_color_ort_file) is False or args.overwrite) and args.co2:
+            scale.main([files.mf_ort_file, files.mf_scaled_color_ort_file, '1', '100000', '--cmap', 'viridis'])
+        if os.path.isfile(files.mf_scaled_color_ort_file) is False or args.overwrite:
+            scale.main([files.mf_ort_file, files.mf_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
 
-    # # Color Uncertainty
-    # if (os.path.isfile(files.uncert_scaled_color_ort_file) is False or args.overwrite) and args.co2:
-    #     scale.main([files.uncert_ort_file, files.uncert_scaled_color_ort_file, '1', '100000', '--cmap', 'viridis'])
-    # if os.path.isfile(files.uncert_scaled_color_ort_file) is False or args.overwrite:
-    #     scale.main([files.uncert_ort_file, files.uncert_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
+        # Color Sensitivity (same for co2 and ch4)
+        if os.path.isfile(files.sens_scaled_color_ort_file) is False or args.overwrite:
+            scale.main([files.sens_ort_file, files.sens_scaled_color_ort_file, '0', '2', '--cmap', 'RdBu_r'])
+
+        # Color Uncertainty
+        if (os.path.isfile(files.uncert_scaled_color_ort_file) is False or args.overwrite) and args.co2:
+            scale.main([files.uncert_ort_file, files.uncert_scaled_color_ort_file, '1', '100000', '--cmap', 'viridis'])
+        if os.path.isfile(files.uncert_scaled_color_ort_file) is False or args.overwrite:
+            scale.main([files.uncert_ort_file, files.uncert_scaled_color_ort_file, '1', '1000', '--cmap', 'plasma'])
+    else:
+        # If we're only keeping the CNN files, remove the ort files to save space
+        for f in [files.mf_ort_file, files.sens_ort_file, files.uncert_ort_file, files.target_file, files.flare_file,
+                  files.mf_file, files.mf_sens_file, files.mf_uncert_file]:
+            for ext in ['', '.hdr', '.aux.xml']:
+                if os.path.isfile(f + ext):
+                    os.remove(f + ext)
 
 
 if __name__ == '__main__':

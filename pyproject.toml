@@ -1,0 +1,129 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "emit-ghg"
+version = "0.0.2"
+description = "EMIT GHG point-source methane and CO2 detection from hyperspectral imaging data"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {file = "LICENSE"}
+authors = [
+    {name = "EMIT Team", email = "emit-ghg@jpl.nasa.gov"}
+]
+keywords = ["hyperspectral", "remote sensing", "methane", "greenhouse gas", "EMIT"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+]
+
+dependencies = [
+    "numpy>=2.0",
+    "scipy",
+    "h5py",
+    "netCDF4",
+    "spectral>=0.23.1",
+    "matplotlib",
+    "pillow",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.jpl.nasa.gov/emit-sds/emit-ghg"
+Repository = "https://github.jpl.nasa.gov/emit-sds/emit-ghg"
+
+[project.scripts]
+emit-ghg-process = "emit_ghg.cli:ghg_process_cli"
+emit-ghg-bulk = "emit_ghg.cli:bulk_cli"
+emit-ghg-plumeid = "emit_ghg.cli:plumeid_cli"
+diffmf = "emit_ghg.diffmf:main"
+emit-target-gen = "emit_ghg.target_generation:main"
+emit-apply-glt = "emit_ghg.apply_glt:main"
+emit-scale = "emit_ghg.scale:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["emit_ghg*", "deploy"]
+
+[tool.setuptools.package-data]
+emit_ghg = ["data/instrument_noise_parameters/*.txt"]
+deploy = ["*.sh"]
+
+# Black code formatting
+[tool.black]
+line-length = 100
+target-version = ['py311']
+
+# Ruff linting
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "W", "I", "N", "UP"]
+ignore = ["E501"]  # Line too long (handled by black)
+
+# Pytest configuration
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]
+addopts = "-v"
+
+# Pixi configuration
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-64", "osx-arm64"]
+
+[tool.pixi.dependencies]
+python = ">=3.11"
+gdal = "*"
+numpy = ">=2.0"
+scipy = "*"
+h5py = "*"
+netcdf4 = ">=1.7.4,<2"
+
+[tool.pixi.pypi-dependencies]
+emit-ghg = { path = ".", editable = true }
+spectral = ">=0.23.1"
+matplotlib = "*"
+pillow = "*"
+
+[tool.pixi.feature.test.dependencies]
+pytest = ">=7.0"
+pytest-cov = ">=4.0"
+
+[tool.pixi.feature.dev.dependencies]
+pytest = ">=7.0"
+pytest-cov = ">=4.0"
+black = ">=23.0"
+ruff = ">=0.1.0"
+
+[tool.pixi.environments]
+default = { solve-group = "default" }
+test = { features = ["test"], solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
+
+[tool.pixi.feature.test.tasks]
+test = "pytest -v"
+test-cov = "pytest --cov=emit_ghg --cov-report=term-missing"
+
+[tool.pixi.feature.dev.tasks]
+format = "black emit_ghg/ deploy/ tests/"
+lint = "ruff check emit_ghg/ deploy/ tests/"
+
+[tool.pixi.tasks]
+verify = "python -c 'from emit_ghg import diffmf; from deploy import ghg_process; print(\"✓ Installation verified\")'"
+
