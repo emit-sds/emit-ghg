@@ -226,10 +226,10 @@ def main(input_args=None):
         clouds_and_surface_water_mask = None
         if args.l2a_mask_file is not None:
             mask_ds = envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')
-            # 0 = trad cloud, 1 = trad cirrus, 2 = water, 9 = specTF cloud, 10 = spectf buff
+            # 0 = trad cloud, 1 = trad cirrus, 2 = water, 5 = specTF cloud, 6 = spectf buff (9 and 10 in V002 mask)
 
             water_mask = mask_ds[ce:chunk_edges[_ce+1],:,2] > 0
-            cloud_mask = np.logical_and(mask_ds[ce:chunk_edges[_ce+1],:,9] > 0, mask_ds[ce:chunk_edges[_ce+1],:,0])
+            cloud_mask = np.logical_and(mask_ds[ce:chunk_edges[_ce+1],:,5] > 0, mask_ds[ce:chunk_edges[_ce+1],:,0])
 
             clouds_and_surface_water_mask = np.logical_or(water_mask, cloud_mask)
             good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
