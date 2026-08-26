@@ -154,6 +154,7 @@ def main(input_args=None):
         band_names += [f'Differential Matched Filter Derivative {n}']
 
     logging.info('Create output file, initialized with nodata')
+    outmeta = {}
     if is_netcdf:
         outmeta = {}
         outmeta['lines'] = nc_radiance.shape[0]
@@ -161,6 +162,7 @@ def main(input_args=None):
         outmeta['bands'] = args.max_deriv+1
     else:
         # assumed envi file
+        outmeta = ds.metadata
         for kwarg in ['smoothing factors','wavelength','wavelength units','fwhm']:
             outmeta.pop(kwarg,None)
 
