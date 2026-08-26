@@ -52,7 +52,7 @@ metadata = {
             'units':  'ppm m'
         },
         'd2': {
-            'name': 'EMIT_L2B_CH4ENHD1',
+            'name': 'EMIT_L2B_CH4ENHD2',
             'description': 'Methane Enhancement Differential Matched Filter Derivative 2 Values',
             'units':  'ppm m'
         }
@@ -79,7 +79,7 @@ metadata = {
             'units':  'ppm m'
         },
         'd2': {
-            'name': 'EMIT_L2B_CO2ENHD1',
+            'name': 'EMIT_L2B_CO2ENHD2',
             'description': 'Carbon Dioxide Enhancement Differential Matched Filter Derivative 2 Values',
             'units':  'ppm m'
         }
