@@ -45,6 +45,16 @@ metadata = {
             'name': 'EMIT_L2B_CH4UNCERT',
             'description': 'Methane Enhancement Uncertainty Values',
             'units':  'ppm m'
+        },
+        'd1': {
+            'name': 'EMIT_L2B_CH4ENHD1',
+            'description': 'Methane Enhancement Differential Matched Filter Derivative 1 Values',
+            'units':  'ppm m'
+        },
+        'd2': {
+            'name': 'EMIT_L2B_CH4ENHD1',
+            'description': 'Methane Enhancement Differential Matched Filter Derivative 2 Values',
+            'units':  'ppm m'
         }
     },
     'co2': {
@@ -62,6 +72,16 @@ metadata = {
             'name': 'EMIT_L2B_CO2UNCERT',
             'description': 'Carbon Dioxide Enhancement Uncertainty Values',
             'units': 'ppm m'
+        },
+        'd1': {
+            'name': 'EMIT_L2B_CO2ENHD1',
+            'description': 'Carbon Dioxide Enhancement Differential Matched Filter Derivative 1 Values',
+            'units':  'ppm m'
+        },
+        'd2': {
+            'name': 'EMIT_L2B_CO2ENHD1',
+            'description': 'Carbon Dioxide Enhancement Differential Matched Filter Derivative 2 Values',
+            'units':  'ppm m'
         }
     }
 }
@@ -188,11 +208,11 @@ def main(input_args=None):
         apply_glt.main([args.glt_file, files.mf_file, files.mf_ort_file])
 
     # COG MF
-    for n, cname in zip(range(args.max_deriv + 1), [files.mf_ort_cog, files.mf_ort_cog_d1, files.mf_ort_cog_d2]):
+    for n, cname, meta in zip(range(args.max_deriv + 1), [files.mf_ort_cog, files.mf_ort_cog_d1, files.mf_ort_cog_d2], [metadata[gas]['mf'], metadata[gas]['d1'],metadata[gas]['d2']]):
         if os.path.isfile(cname) is False: 
             convert_to_cog(files.mf_ort_file,
                            cname,
-                           metadata[gas]['mf'],
+                           meta,
                            args.software_version,
                            args.product_version,
                            band_i=n+1)

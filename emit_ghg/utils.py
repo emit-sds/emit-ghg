@@ -97,7 +97,7 @@ def convert_to_cog(input_file, output_file, product_metadata, software_build_ver
     metadata['project'] = "Earth Surface Mineral Dust Source Investigation"
     metadata['project_url'] = "https://earth.jpl.nasa.gov/emit/"
     metadata['publisher_name'] = "NASA LPDAAC"
-    metadata['publisher_url'] = "https://lpdaac.usgs.gov"
+    metadata['publisher_url'] = "https://www.earthdata.nasa.gov/centers/lp-daac"
     metadata['publisher_email'] = "lpdaac@usgs.gov"
     metadata['identifier_product_doi_authority'] = "https://doi.org"
     metadata['software_build_version'] = software_build_version
