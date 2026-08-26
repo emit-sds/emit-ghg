@@ -85,7 +85,7 @@ def convert_to_cog(input_file, output_file, product_metadata, software_build_ver
     metadata['sensor'] = "EMIT (Earth Surface Mineral Dust Source Investigation)"
     metadata['instrument'] = "EMIT"
     metadata['platform'] = "ISS"
-    metadata['Conventions'] = "CF-1.63"
+    metadata['Conventions'] = "CF-1.13"
     metadata['institution'] = "NASA Jet Propulsion Laboratory/California Institute of Technology"
     metadata['license'] = "https://www.earthdata.nasa.gov/engage/open-data-services-software-policies/data-use-guidance"
     metadata['naming_authority'] = "LPDAAC"
