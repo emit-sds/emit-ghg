@@ -7,17 +7,16 @@ dependencies:
   - python>=3.11
 
   # Required: GDAL must be installed via conda (not pip)
-  - gdal
+  - gdal=3.13.3
 
   # Scientific Computing (all available via conda)
-  - numpy>=2.0
-  - scipy
-  - h5py
-  - pytest
-  - netcdf4
+  - numpy=2.5.2
+  - scipy=1.18.0
+  - h5py=3.16.0
+  - pytest=9.1.1
+  - netcdf4=1.7.4
 
   # Python packages via pip
   - pip:
-      - spectral  # Hyperspectral image processing
-      - argparse
-
+      - spectral==0.24
+      - argparse==1.1
