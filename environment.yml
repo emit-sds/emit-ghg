@@ -4,7 +4,7 @@ channels:
 
 dependencies:
   # Core Python
-  - python=3.11
+  - python=3.14
 
   # Required: GDAL must be installed via conda (not pip)
   - gdal=3.13.3
