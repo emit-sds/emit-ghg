@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+#### [v1.0.0](https://github.com/emit-sds/emit-ghg/compare/v0.3.8...v1.0.0)
+
+> 3 Sep 2026
+
+* V3 by @pgbrodrick in https://github.com/emit-sds/emit-ghg/pull/58
+
 #### [v0.3.8](https://github.com/emit-sds/emit-ghg/compare/v0.3.7...v0.3.8)
 
 > 26 Jan 2026
