@@ -45,15 +45,16 @@ def write_output_file(source_ds, output_img, output_file):
 
 def main(input_args=None):
     parser = argparse.ArgumentParser(description="Scale input images")
-    parser.add_argument('input_file', type=str,  metavar='INPUT', help='path to input image')   
-    parser.add_argument('output_file', type=str,  metavar='OUTPUT', help='path to input image')   
-    parser.add_argument('bounds', type=float,  nargs=2, metavar='SCALING RANGE', help='path to input image')   
-    parser.add_argument('--cmap', type=str,  default=None, choices=['plasma','YlOrRd', 'viridis', 'RdBu_r'], metavar='COLOR_SCALE', help='color scale to apply')   
+    parser.add_argument('input_file', type=str,  metavar='INPUT', help='path to input image')
+    parser.add_argument('output_file', type=str,  metavar='OUTPUT', help='path to input image')
+    parser.add_argument('bounds', type=float,  nargs=2, metavar='SCALING RANGE', help='path to input image')
+    parser.add_argument('--cmap', type=str,  default=None, choices=['plasma','YlOrRd', 'viridis', 'RdBu_r'], metavar='COLOR_SCALE', help='color scale to apply')
+    parser.add_argument('--band', type=int,  default=0, help='Band from input file to use')
     args = parser.parse_args(input_args)
 
 
     ds = gdal.Open(args.input_file,gdal.GA_ReadOnly)
-    dat = ds.ReadAsArray().astype(np.float32)
+    dat = ds.GetRasterBand(args.band + 1).ReadAsArray().astype(np.float32)
     dat[dat == ds.GetRasterBand(1).GetNoDataValue()] = np.nan
 
     print(args.cmap)

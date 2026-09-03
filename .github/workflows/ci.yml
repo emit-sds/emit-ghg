@@ -1,0 +1,65 @@
+name: Mamba Test Matrix
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+jobs:
+  mamba-test:
+    name: Python ${{ matrix.python-version }} (mamba)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Miniforge (mamba)
+      uses: conda-incubator/setup-miniconda@v3
+      with:
+        miniforge-version: latest
+        use-mamba: true
+        python-version: ${{ matrix.python-version }}
+        channels: conda-forge
+        channel-priority: strict
+        activate-environment: emit-ghg
+
+    # environment.yml pins python>=3.11, which would block 3.10 and could
+    # override the matrix version. Install the conda dependencies directly
+    # with the matrix python pinned instead.
+    - name: Install conda dependencies
+      run: |
+        mamba install -y \
+          python=${{ matrix.python-version }} \
+          gdal \
+          "numpy>=2.0" \
+          scipy \
+          h5py \
+          pytest \
+          netcdf4
+
+    - name: Install package
+      run: |
+        pip install -e ".[test]"
+
+    - name: Run tests
+      run: |
+        pytest -v
+
+    - name: Check CLI commands
+      run: |
+        diffmf --help
+        emit-ghg-process --help
+        emit-target-gen --help
+        emit-apply-glt --help
+

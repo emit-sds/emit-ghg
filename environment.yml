@@ -1,13 +1,22 @@
+name: emit-ghg
 channels:
   - conda-forge
+
 dependencies:
-  - gdal=3.8.5  
-  - h5py=3.13.0
-  - matplotlib=3.10.1
-  - numpy=2.2.4
-  - pip=25.0.1
-  - python=3.11.10
-  - scipy=1.15.2
+  # Core Python
+  - python=3.14
+
+  # Required: GDAL must be installed via conda (not pip)
+  - gdal=3.13.3
+
+  # Scientific Computing (all available via conda)
+  - numpy=2.5.2
+  - scipy=1.18.0
+  - h5py=3.16.0
+  - pytest=9.1.1
+  - netcdf4=1.7.4
+
+  # Python packages via pip
   - pip:
-      - ray==2.44.0
-      - spectral==0.23.1
+      - spectral==0.24
+      - argparse==1.1

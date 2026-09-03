@@ -13,6 +13,8 @@ class Filenames():
         self.flare_file = f'{output_base}_flares.json' #Flares
         self.mf_ort_file = f'{output_base}_mf_ort' #MF - ORT
         self.mf_ort_cog = f'{output_base}_mf_ort.tif' #MF - ORT
+        self.mf_ort_cog_d1 = f'{output_base}_mf_ort_d1.tif' #MF - ORT
+        self.mf_ort_cog_d2 = f'{output_base}_mf_ort_d2.tif' #MF - ORT
         self.mf_ort_ql = f'{output_base}_mf_ort.png' #MF - ORT
         self.mf_scaled_color_ort_file = f'{output_base}_mf_scaled_color_ort.tif' #MF - ORT - Scaled Color
         self.sens_ort_file = f'{output_base}_sens_ort' #Sensitivity ort

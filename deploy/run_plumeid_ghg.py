@@ -18,12 +18,12 @@
 
 import argparse
 import subprocess
-
 import os
-from utils import envi_header
 from glob import glob
 import json
 import numpy as np
+
+from emit_ghg.utils import envi_header
 
 
 

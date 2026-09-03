@@ -78,14 +78,14 @@ class SerialEncoder(json.JSONEncoder):
         else:
             return super(SerialEncoder, self).default(obj)
 
-def convert_to_cog(input_file, output_file,product_metadata,software_build_version,product_version):
+def convert_to_cog(input_file, output_file, product_metadata, software_build_version, product_version, band_i=None):
 
     metadata = {}
     metadata['keywords'] = "Imaging Spectroscopy, minerals, EMIT, dust, radiative forcing"
     metadata['sensor'] = "EMIT (Earth Surface Mineral Dust Source Investigation)"
     metadata['instrument'] = "EMIT"
     metadata['platform'] = "ISS"
-    metadata['Conventions'] = "CF-1.63"
+    metadata['Conventions'] = "CF-1.13"
     metadata['institution'] = "NASA Jet Propulsion Laboratory/California Institute of Technology"
     metadata['license'] = "https://www.earthdata.nasa.gov/engage/open-data-services-software-policies/data-use-guidance"
     metadata['naming_authority'] = "LPDAAC"
@@ -97,7 +97,7 @@ def convert_to_cog(input_file, output_file,product_metadata,software_build_versi
     metadata['project'] = "Earth Surface Mineral Dust Source Investigation"
     metadata['project_url'] = "https://earth.jpl.nasa.gov/emit/"
     metadata['publisher_name'] = "NASA LPDAAC"
-    metadata['publisher_url'] = "https://lpdaac.usgs.gov"
+    metadata['publisher_url'] = "https://www.earthdata.nasa.gov/centers/lp-daac"
     metadata['publisher_email'] = "lpdaac@usgs.gov"
     metadata['identifier_product_doi_authority'] = "https://doi.org"
     metadata['software_build_version'] = software_build_version
@@ -105,7 +105,11 @@ def convert_to_cog(input_file, output_file,product_metadata,software_build_versi
 
     metadata['description'] = product_metadata['description']
 
-    ds_mem = gdal.Translate('', input_file, format='MEM')
+    if band_i == None:
+        ds_mem = gdal.Translate('', input_file, format='MEM')
+        band_i = 1
+    else:
+        ds_mem = gdal.Translate('', input_file, format='MEM', bandList=[band_i]) 
     ds_mem.SetMetadata(metadata)
 
     band = ds_mem.GetRasterBand(1)
