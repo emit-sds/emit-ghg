@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        python-version: ['3.11', '3.12', '3.13', '3.14']
 
     defaults:
       run:
@@ -34,9 +34,6 @@ jobs:
         channel-priority: strict
         activate-environment: emit-ghg
 
-    # environment.yml pins python>=3.11, which would block 3.10 and could
-    # override the matrix version. Install the conda dependencies directly
-    # with the matrix python pinned instead.
     - name: Install conda dependencies
       run: |
         mamba install -y \
