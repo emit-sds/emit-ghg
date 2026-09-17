@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "emit-ghg"
-version = "1.0.0"
+version = "1.0.1"
 description = "EMIT GHG point-source methane and CO2 detection from hyperspectral imaging data"
 readme = "README.md"
 requires-python = ">=3.11"
