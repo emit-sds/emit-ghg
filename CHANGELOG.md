@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+#### [v1.0.1](https://github.com/emit-sds/emit-ghg/compare/v1.0.0...v1.0.1)
+
+> 17 Sep 2026
+
+* Workflow patch by @pgbrodrick in https://github.com/emit-sds/emit-ghg/pull/60
+* add mosaic.py back in by @pgbrodrick in https://github.com/emit-sds/emit-ghg/pull/61
+
 #### [v1.0.0](https://github.com/emit-sds/emit-ghg/compare/v0.3.8...v1.0.0)
 
 > 3 Sep 2026
