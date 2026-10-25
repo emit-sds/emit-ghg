@@ -37,7 +37,7 @@ pixi shell
 ```bash
 # Create environment and install dependencies
 mamba env create -f environment.yml
-conda activate emit-ghg
+mamba activate emit-ghg
 
 # Install package in editable mode
 pip install -e .
