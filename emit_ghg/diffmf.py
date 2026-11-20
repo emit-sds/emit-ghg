@@ -45,34 +45,37 @@ from scipy.signal import savgol_filter
 
 def main(input_args=None):
     parser = argparse.ArgumentParser(description="Robust MF")
-    parser.add_argument('radiance_file', type=str,  metavar='INPUT', help='path to input image')   
+    parser.add_argument('radiance_file', type=str,  metavar='INPUT', help='path to input image')
     parser.add_argument('library', type=str,  metavar='LIBRARY', help='path to target library file')
-    parser.add_argument('output_file', type=str,  metavar='OUTPUT', help='path for output image (mf ch4 ppm)')    
+    parser.add_argument('output_file', type=str,  metavar='OUTPUT', help='path for output image (mf ch4 ppm)')
 
-    parser.add_argument('--covariance_style', type=str, default='looshrinkage', choices=['empirical', 'looshrinkage'], help='style of covariance estimation') 
-    parser.add_argument('--fixed_alpha', type=float, default=None, help='fixed value for shrinkage (with looshrinkage covariance style only)')    
+    parser.add_argument('--covariance_style', type=str, default='looshrinkage', choices=['empirical', 'looshrinkage'], help='style of covariance estimation')
+    parser.add_argument('--fixed_alpha', type=float, default=None, help='fixed value for shrinkage (with looshrinkage covariance style only)')
     parser.add_argument('--num_cores', type=int, default=-1, help='number of cores (-1 (default))')
     parser.add_argument('--max_deriv', type=int, default=2, help='maximum order of diffmf derivatives (2 (default))')
     parser.add_argument('--fg_num_sigma', type=int, default=3, help='number of sigma for foreground mask (1 (default))')
-    parser.add_argument('--fg_input_file', type=str,  metavar='INPUT', help='path for diffmf sigma foreground mask input image (binary mask)')        
+    parser.add_argument('--fg_input_file', type=str,  metavar='INPUT', help='path for diffmf sigma foreground mask input image (binary mask)')
     parser.add_argument('--fg_output_file', type=str,  metavar='OUTPUT', help='path for diffmf sigma foreground mask output image (binary mask)')
-    parser.add_argument('--wavelength_range', nargs='+', type=float, default=[500, 1340, 1500, 1790, 1950, 2450], help='wavelengths to use: None = default for gas, 2x values = min/max pairs of regions')         
-    parser.add_argument('--l1b_bandmask_file',type=str,default=None, help='path to the l1b bandmask file for saturation')         
-    parser.add_argument('--l2a_mask_file', type=str,  help='path to l2a mask image for clouds and water')   
-    parser.add_argument('--mask_clouds_water',action='store_true', help='mask clouds and water from output matched filter')         
-    parser.add_argument('--mask_saturation',action='store_true', help='mask saturated pixels from output matched filter')         
-    parser.add_argument('--mask_flares',action='store_true', help='mask flared pixels from output matched filter')         
-    parser.add_argument('--reflectance_mode',action='store_true', help='run as absorption feature subtraction')         
-    parser.add_argument('--ppm_scaling', type=float, default=100000.0, help='scaling factor to unit convert outputs - based on target')         
-    parser.add_argument('--nodata_value', type=float, default=-9999, help='output nodata value')         
-    parser.add_argument('--screen_value', type=float, default=-9999, help='value assigned to screened out pixels')         
-    parser.add_argument('--flare_outfile', type=str, default=None, help='output geojson to write flare location centers')         
-    parser.add_argument('--chunksize', type=int, default=None, help='chunk radiance (for memory issues with large scenes)')         
-    parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')    
-    parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')         
-    parser.add_argument('--uncert_output_file', type=str,  metavar='OUTPUT', help='path for uncertainty output image (mf ch4 ppm)')    
-    parser.add_argument('--sens_output_file', type=str,  metavar='OUTPUT', help='path for sensitivity output image (mf ch4 ppm)')    
-    parser.add_argument('--noise_parameters_file', type=str, default=None, help='Mandatory input to produce uncertainty metric. EMIT file found in data/instrument_noise_parameters/emit_noise.txt')         
+    parser.add_argument('--wavelength_range', nargs='+', type=float, default=[500, 1340, 1500, 1790, 1950, 2450], help='wavelengths to use: None = default for gas, 2x values = min/max pairs of regions')
+    parser.add_argument('--l1b_bandmask_file',type=str,default=None, help='path to the l1b bandmask file for saturation')
+    parser.add_argument('--l2a_mask_file', type=str,  help='path to l2a mask image for clouds and water')
+    parser.add_argument('--mask_clouds_water',action='store_true', help='mask clouds and water from output matched filter')
+    parser.add_argument('--mask_saturation',action='store_true', help='mask saturated pixels from output matched filter')
+    parser.add_argument('--mask_flares',action='store_true', help='mask flared pixels from output matched filter')
+    parser.add_argument('--reflectance_mode',action='store_true', help='run as absorption feature subtraction')
+    parser.add_argument('--ppm_scaling', type=float, default=100000.0, help='scaling factor to unit convert outputs - based on target')
+    parser.add_argument('--nodata_value', type=float, default=-9999, help='output nodata value')
+    parser.add_argument('--screen_value', type=float, default=-9999, help='value assigned to screened out pixels')
+    parser.add_argument('--flare_outfile', type=str, default=None, help='output geojson to write flare location centers')
+    parser.add_argument('--chunksize', type=int, default=None, help='chunk radiance (for memory issues with large scenes)')
+    parser.add_argument('--loglevel', type=str, default='DEBUG', help='logging verbosity')
+    parser.add_argument('--logfile', type=str, default=None, help='output file to write log to')
+    parser.add_argument('--uncert_output_file', type=str,  metavar='OUTPUT', help='path for uncertainty output image (mf ch4 ppm)')
+    parser.add_argument('--sens_output_file', type=str,  metavar='OUTPUT', help='path for sensitivity output image (mf ch4 ppm)')
+    parser.add_argument('--noise_parameters_file', type=str, default=None, help='Mandatory input to produce uncertainty metric. EMIT file found in data/instrument_noise_parameters/emit_noise.txt')
+    parser.add_argument('--mask_cloud_band', type=int, default=0, help='band index of traditional cloud flag in l2a mask file')
+    parser.add_argument('--mask_water_band', type=int, default=2, help='band index of water flag in l2a mask file')
+    parser.add_argument('--mask_spectf_band', type=int, default=5, help='band index of SpecTF cloud flag in l2a mask file')
     args = parser.parse_args(input_args)
 
     if (args.uncert_output_file is not None and args.sens_output_file is None) or \
@@ -193,7 +196,7 @@ def main(input_args=None):
         del output_ds
         write_bil_chunk(np.ones(output_shape)*args.nodata_value, args.sens_output_file, 0, output_shape)
 
- 
+
     if args.chunksize is None:
         chunk_edges = [0, output_shape[0]]
     else:
@@ -233,65 +236,65 @@ def main(input_args=None):
             mask_ds = envi.open(envi_header(args.l2a_mask_file)).open_memmap(interleave='bip')
             # 0 = trad cloud, 1 = trad cirrus, 2 = water, 5 = specTF cloud, 6 = spectf buff (9 and 10 in V002 mask)
 
-            water_mask = mask_ds[ce:chunk_edges[_ce+1],:,2] > 0
-            cloud_mask = np.logical_and(mask_ds[ce:chunk_edges[_ce+1],:,5] > 0, mask_ds[ce:chunk_edges[_ce+1],:,0])
+            water_mask = mask_ds[ce:chunk_edges[_ce+1],:,args.mask_water_band] > 0
+            cloud_mask = np.logical_and(mask_ds[ce:chunk_edges[_ce+1],:,args.mask_spectf_band] > 0, mask_ds[ce:chunk_edges[_ce+1],:,args.mask_cloud_band])
 
             clouds_and_surface_water_mask = np.logical_or(water_mask, cloud_mask)
             good_pixel_mask = np.where(clouds_and_surface_water_mask, False, good_pixel_mask)
-        
+
         good_pixel_mask_for_mf = np.ascontiguousarray(good_pixel_mask.T)
 
         surfmskf = args.output_file + '_surfmsks.npz'
         surfmsks = dict(possurfmsk=good_pixel_mask_for_mf.copy())
         np.savez_compressed(surfmskf,**surfmsks,allow_pickle=False)
-        
+
         logging.info("applying matched filter")
-        output_retr_dat, output_uncert_dat,  output_sens_dat = diffmf_full_scene(rad_for_mf, 
+        output_retr_dat, output_uncert_dat,  output_sens_dat = diffmf_full_scene(rad_for_mf,
                                                                                  absorption_coefficients,
                                                                                  good_pixel_mask_for_mf,
                                                                                  noise_model_parameters,
                                                                                  args)
 
         # output_retr_dat.shape -> (lines,samples,bands) for apply_badvalue
-        output_retr_dat   = output_retr_dat.transpose([1,0,2]) 
+        output_retr_dat   = output_retr_dat.transpose([1,0,2])
         if args.uncert_output_file is not None:
-            output_uncert_dat = output_uncert_dat.transpose([1,0,2]) 
+            output_uncert_dat = output_uncert_dat.transpose([1,0,2])
         if args.sens_output_file is not None:
-            output_sens_dat   = output_sens_dat.transpose([1,0,2]) 
+            output_sens_dat   = output_sens_dat.transpose([1,0,2])
 
         def apply_badvalue(d, mask, bad_data_value):
-            d[mask] = bad_data_value 
+            d[mask] = bad_data_value
             return d
 
         if args.mask_clouds_water and clouds_and_surface_water_mask is not None:
             logging.info('Masking clouds and water')
-            output_retr_dat = apply_badvalue(output_retr_dat, clouds_and_surface_water_mask, args.screen_value) 
+            output_retr_dat = apply_badvalue(output_retr_dat, clouds_and_surface_water_mask, args.screen_value)
             if args.uncert_output_file is not None:
-                output_uncert_dat = apply_badvalue(output_uncert_dat, clouds_and_surface_water_mask, args.screen_value) 
+                output_uncert_dat = apply_badvalue(output_uncert_dat, clouds_and_surface_water_mask, args.screen_value)
             if args.sens_output_file is not None:
-                output_sens_dat = apply_badvalue(output_sens_dat, clouds_and_surface_water_mask, args.screen_value) 
+                output_sens_dat = apply_badvalue(output_sens_dat, clouds_and_surface_water_mask, args.screen_value)
 
         if args.mask_saturation and saturation is not None:
             logging.info('Masking saturation')
-            output_retr_dat = apply_badvalue(output_retr_dat, saturation, args.screen_value) 
+            output_retr_dat = apply_badvalue(output_retr_dat, saturation, args.screen_value)
             if args.uncert_output_file is not None:
-                output_uncert_dat = apply_badvalue(output_uncert_dat, saturation, args.screen_value) 
+                output_uncert_dat = apply_badvalue(output_uncert_dat, saturation, args.screen_value)
             if args.sens_output_file is not None:
-                output_sens_dat = apply_badvalue(output_sens_dat, saturation, args.screen_value) 
+                output_sens_dat = apply_badvalue(output_sens_dat, saturation, args.screen_value)
 
         if args.mask_flares and saturation is not None:
             logging.info('Masking saturation')
-            output_retr_dat = apply_badvalue(output_retr_dat, dilated_saturation, args.screen_value) 
-            output_retr_dat = apply_badvalue(output_retr_dat, dilated_flare_mask, args.screen_value) 
+            output_retr_dat = apply_badvalue(output_retr_dat, dilated_saturation, args.screen_value)
+            output_retr_dat = apply_badvalue(output_retr_dat, dilated_flare_mask, args.screen_value)
 
             if args.uncert_output_file is not None:
-                output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_saturation, args.screen_value) 
-                output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_flare_mask, args.screen_value) 
+                output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_saturation, args.screen_value)
+                output_uncert_dat = apply_badvalue(output_uncert_dat, dilated_flare_mask, args.screen_value)
             if args.sens_output_file is not None:
-                output_sens_dat = apply_badvalue(output_sens_dat, dilated_saturation, args.screen_value) 
-                output_sens_dat = apply_badvalue(output_sens_dat, dilated_flare_mask, args.screen_value) 
+                output_sens_dat = apply_badvalue(output_sens_dat, dilated_saturation, args.screen_value)
+                output_sens_dat = apply_badvalue(output_sens_dat, dilated_flare_mask, args.screen_value)
         # output_retr_dat.shape -> (lines,bands,samples) for write_bil_chunk
-        output_retr_dat = output_retr_dat.transpose(0,2,1) 
+        output_retr_dat = output_retr_dat.transpose(0,2,1)
         if args.uncert_output_file is not None:
             output_uncert_dat = output_uncert_dat.transpose(0,2,1)
         if args.sens_output_file is not None:
@@ -336,7 +339,7 @@ def write_hotspot_vector(output_file, flares, saturation):
                                         "type":"Feature"})
 
     with open(output_file, 'w') as fout:
-        fout.write(json.dumps(outdict, cls=SerialEncoder)) 
+        fout.write(json.dumps(outdict, cls=SerialEncoder))
 
 
 def fit_looshrinkage_alpha(data, alphas, I_reg=[]):
@@ -430,8 +433,8 @@ def apply_looshrinkage_alpha(data:np.array, alpha: float, I_reg=[]):
         T = np.diag(np.diag(S))
     else:
         T = cov(I_reg)
-        
-    # Final covariance 
+
+    # Final covariance
     C = (1.0 - alpha) * S + alpha * T
 
     return C
@@ -442,7 +445,7 @@ def calculate_mf_covariance(radiance: np.array, model: str, fixed_alpha: float =
 
     Args:
         radiance (np.array): radiance data
-        model (str): 
+        model (str):
 
     Returns:
         tuple: (covariance, mean)
@@ -485,7 +488,7 @@ def calculate_saturation_mask(bandmask_file: str, radiance: np.array, dilation_i
 
 
 def calculate_flare_mask(radiance: np.array, preflagged_pixels: np.array, wavelengths: np.array):
-    b270_idx = np.argmin(np.abs(wavelengths - 2389.486)) 
+    b270_idx = np.argmin(np.abs(wavelengths - 2389.486))
     hot_mask = np.where(np.logical_and(radiance[:,b270_idx,:] > 1.5, preflagged_pixels == True), 1., 0.)
     hot_mask_dilated = scipy.ndimage.uniform_filter(hot_mask, [5,5]) > 0.01
     return hot_mask_dilated, hot_mask
@@ -513,10 +516,10 @@ def savgol(x,deriv=0,wlen=5,pord=4,delta=1.0,axis=-1):
 def sqrtm(A,approx=False):
     if not approx:
         # scipy.sqrtm (can be) slow for large A
-        # due to O(n^3) schur decomposition 
+        # due to O(n^3) schur decomposition
         As = _sqrtm(A)
     else:
-        # eigh 2-3x faster approx w/ results ~identical to sqrtm 
+        # eigh 2-3x faster approx w/ results ~identical to sqrtm
         D, V = _eigh(A,check_finite=False)
         As = (V * np.where(D!=0,np.sqrt(D),0)) @ V.T
     return As
@@ -529,7 +532,7 @@ def diffmf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask,
     max_deriv = args.max_deriv
     derivs = np.arange(0,max_deriv+1)
     nderiv = len(derivs)
-    
+
     diffmf = np.ones((ncross, nalong, nderiv)) * args.nodata_value
     uncert = np.ones((ncross, nalong, nderiv)) * args.nodata_value
     sens = np.ones((ncross, nalong, nderiv)) * args.nodata_value
@@ -548,7 +551,7 @@ def diffmf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask,
 
         if args.uncert_output_file is not None:
             nedl_variance = (get_noise_equivalent_spectral_radiance(noise_model_parameters, rdn_col))**2
-        
+
         try:
             C = calculate_mf_covariance(rdn_col[good_pixel_idx,:], args.covariance_style, args.fixed_alpha)
             Cstd = sqrtm(inv(C, check_finite=False))
@@ -560,7 +563,7 @@ def diffmf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask,
             tgt_zmw = (absorption_coefficients-col_mu).dot(Cstd)
         else:
             tgt_zmw = (absorption_coefficients*col_mu).dot(Cstd)
-        col_zmw = (rdn_col[no_radiance_mask,:]-col_mu).dot(Cstd)                
+        col_zmw = (rdn_col[no_radiance_mask,:]-col_mu).dot(Cstd)
         for d in derivs:
             if d==0: # diffmf(d==0): standard CMF
                 dcol_zmw = col_zmw
@@ -568,13 +571,13 @@ def diffmf_full_scene(rdn_subset, absorption_coefficients, good_pixel_mask,
             else: # diffmf(d>0)
                 dcol_zmw = savgol(col_zmw,deriv=d)
                 dtgt_zmw = savgol(tgt_zmw,deriv=d)
-                
+
             dtgt_norm = dtgt_zmw.dot(dtgt_zmw.T)
-            
+
             # Matched filter
             diffmf_col = dcol_zmw.dot(dtgt_zmw.T) / dtgt_norm
             diffmf[col, no_radiance_mask, d] = diffmf_col if args.reflectance_mode else diffmf_col * args.ppm_scaling
-        
+
             if args.uncert_output_file is not None:
                 ####################################################################################################################
                 # Uncertainty
